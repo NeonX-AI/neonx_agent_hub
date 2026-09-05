@@ -1,0 +1,4 @@
+dist/
+platforms/windows/obj/
+*.pfx
+*.p12
