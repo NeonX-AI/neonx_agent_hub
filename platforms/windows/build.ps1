@@ -39,6 +39,7 @@ function Import-VersionEnvironment {
     }
 
     $required = @(
+        "NEONX_HUB_VERSION",
         "NEONX_OPENCLAW_VERSION",
         "NEONX_CODEX_PLUGIN_VERSION",
         "NEONX_NODEJS_VERSION",
@@ -48,6 +49,7 @@ function Import-VersionEnvironment {
     foreach ($name in $required) {
         if (-not $values.ContainsKey($name)) { throw "Missing version configuration value: $name" }
     }
+    if ($values.NEONX_HUB_VERSION -notmatch '^\d+\.\d+\.\d+$') { throw "NEONX_HUB_VERSION must contain three numeric parts." }
     if ($values.NEONX_OPENCLAW_VERSION -notmatch '^\d+\.\d+\.\d+$') { throw "NEONX_OPENCLAW_VERSION must contain three numeric parts." }
     if ($values.NEONX_CODEX_PLUGIN_VERSION -notmatch '^\d+\.\d+\.\d+$') { throw "NEONX_CODEX_PLUGIN_VERSION must contain three numeric parts." }
     if ($values.NEONX_NODEJS_VERSION -notmatch '^\d+\.\d+\.\d+$') { throw "NEONX_NODEJS_VERSION must contain three numeric parts." }
@@ -61,18 +63,20 @@ function Import-VersionEnvironment {
 function New-ComponentVersionsSource {
     param([hashtable]$Versions, [string]$DestinationPath)
 
+    $hub = $Versions.NEONX_HUB_VERSION
     $openClaw = $Versions.NEONX_OPENCLAW_VERSION
     $codexPlugin = $Versions.NEONX_CODEX_PLUGIN_VERSION
     $nodeJs = $Versions.NEONX_NODEJS_VERSION
     $nodeX64Hash = $Versions.NEONX_NODEJS_X64_SHA256.ToUpperInvariant()
     $nodeArm64Hash = $Versions.NEONX_NODEJS_ARM64_SHA256.ToUpperInvariant()
-    $assemblyVersion = $openClaw + ".0"
+    $assemblyVersion = $hub + ".0"
 
     $content = @"
 namespace NeonX.OpenClawInstaller
 {
     internal static class ComponentVersions
     {
+        internal const string Hub = "$hub";
         internal const string OpenClaw = "$openClaw";
         internal const string CodexPlugin = "$codexPlugin";
         internal const string NodeJs = "$nodeJs";

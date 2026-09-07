@@ -8,6 +8,8 @@ The Windows release currently includes OpenClaw `2026.9.1` and installs the `@op
 - **Install Codex** when OpenClaw is already installed but its Codex plugin is missing.
 - **Onboard** when OpenClaw is installed but has not been configured yet; this opens the interactive setup wizard in a visible terminal, then launches the dashboard automatically.
 - **Open** when OpenClaw is configured; this starts the local gateway with a freshly generated secure token and launches the authenticated Control UI in the default browser.
+- **Update** is shown as a separate optional action when a newer OpenClaw version is available; opening OpenClaw never prompts for or starts an update automatically.
+- Before updating, NeonX warns that configuration changes may require review or reconfiguration and asks the user to confirm.
 - **Stop** terminates the OpenClaw gateway started by NeonX and requests any managed OpenClaw gateway service to stop.
 - **Refresh** to run system detection again.
 

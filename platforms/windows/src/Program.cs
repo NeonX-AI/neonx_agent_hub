@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
@@ -38,6 +38,7 @@ namespace NeonX.OpenClawInstaller
     internal sealed class InstallerForm : Form
     {
         private const string Version = ComponentVersions.OpenClaw;
+        private const string HubVersion = ComponentVersions.Hub;
         private const string CodexPluginVersion = ComponentVersions.CodexPlugin;
         private const string RecommendedNodeVersion = ComponentVersions.NodeJsDistribution;
         private const string NodeX64Sha256 = ComponentVersions.NodeX64Sha256;
@@ -46,9 +47,12 @@ namespace NeonX.OpenClawInstaller
         private readonly ProgressBar progress = new ProgressBar();
         private readonly TextBox log = new TextBox();
         private readonly Button install = new Button();
+        private readonly LinkLabel updateLink = new LinkLabel();
         private readonly Button stop = new Button();
         private readonly Button close = new Button();
         private readonly Button refresh = new Button();
+        private readonly Button desktopShortcut = new Button();
+        private readonly Button addModel = new Button();
         private readonly LinkLabel source = new LinkLabel();
         private readonly Label nodeStatus = new Label();
         private readonly Label openClawStatus = new Label();
@@ -60,6 +64,8 @@ namespace NeonX.OpenClawInstaller
         private bool openClawInstalled;
         private bool openClawConfigured;
         private bool codexInstalled;
+        private bool openClawUpdateAvailable;
+        private string detectedOpenClawVersion = "";
         private Process gatewayProcess;
         private string gatewayToken = "";
         private int gatewayPort = 18789;
@@ -67,7 +73,7 @@ namespace NeonX.OpenClawInstaller
         public InstallerForm()
         {
             Text = "NeonX Agent Hub";
-            ClientSize = new Size(820, 650);
+            ClientSize = new Size(820, 600);
             StartPosition = FormStartPosition.CenterScreen;
             BackColor = Color.FromArgb(15, 23, 42);
             ForeColor = Color.White;
@@ -82,14 +88,15 @@ namespace NeonX.OpenClawInstaller
             logoImage.Location = new Point(30, 24);
             logoImage.Size = new Size(72, 72);
             logoImage.CornerRadius = 15;
+            logoImage.Cursor = Cursors.Hand;
+            logoImage.Click += delegate { OpenUrl("https://neonx.ai"); };
             Controls.Add(logoImage);
             Controls.Add(MakeLabel("NeonX Agent Hub", 122, 30, 22F, Color.White));
             Controls.Add(MakeLabel("Install, launch, and manage your local AI agents", 124, 70, 9F, Color.FromArgb(148, 163, 184)));
-            Controls.Add(MakeLabel("1 agent available", 650, 51, 9F, Color.FromArgb(34, 211, 238)));
 
             RoundedPanel card = new RoundedPanel();
             card.Location = new Point(30, 120);
-            card.Size = new Size(760, 176);
+            card.Size = new Size(760, 218);
             card.BackColor = Color.FromArgb(30, 41, 59);
             card.BorderColor = Color.FromArgb(51, 65, 85);
             card.CornerRadius = 18;
@@ -127,19 +134,22 @@ namespace NeonX.OpenClawInstaller
             codexStatus.Location = new Point(106, 147);
             card.Controls.Add(codexStatus);
 
-            source.Text = "Release details";
-            source.LinkColor = Color.FromArgb(34, 211, 238);
-            source.AutoSize = true;
-            source.Location = new Point(480, 150);
-            source.LinkClicked += delegate { OpenUrl("https://github.com/openclaw/openclaw/releases/tag/v" + Version); };
-            card.Controls.Add(source);
-
             ConfigureButton(install, "Checking...", 0, Color.FromArgb(8, 145, 178));
             install.Location = new Point(620, 53);
             install.Size = new Size(112, 42);
             install.Enabled = false;
             install.Click += async delegate { await HandleOpenClawActionAsync(); };
             card.Controls.Add(install);
+
+            updateLink.Text = "Update available";
+            updateLink.LinkColor = Color.FromArgb(34, 211, 238);
+            updateLink.ActiveLinkColor = Color.White;
+            updateLink.AutoSize = true;
+            updateLink.Font = new Font("Segoe UI", 8.5F);
+            updateLink.Location = new Point(300, 79);
+            updateLink.Visible = false;
+            updateLink.LinkClicked += async delegate { await UpdateOpenClawAsync(); };
+            card.Controls.Add(updateLink);
 
             ConfigureButton(stop, "Stop", 0, Color.FromArgb(185, 28, 28));
             stop.Location = new Point(500, 53);
@@ -148,6 +158,14 @@ namespace NeonX.OpenClawInstaller
             stop.Visible = false;
             stop.Click += async delegate { await StopOpenClawAsync(); };
             card.Controls.Add(stop);
+
+            ConfigureButton(addModel, "+  Add model", 500, Color.FromArgb(14, 116, 144));
+            addModel.Location = new Point(106, 174);
+            addModel.Size = new Size(132, 32);
+            addModel.Font = new Font("Segoe UI Semibold", 8.5F, FontStyle.Bold);
+            addModel.Click += async delegate { await AddModelAsync(); };
+            addModel.Visible = false;
+            card.Controls.Add(addModel);
 
             status.Text = "Ready to install";
             status.Font = new Font("Segoe UI Semibold", 10F, FontStyle.Bold);
@@ -171,15 +189,28 @@ namespace NeonX.OpenClawInstaller
             Controls.Add(log);
 
             ConfigureButton(refresh, "Refresh", 572, Color.FromArgb(51, 65, 85));
-            refresh.Location = new Point(580, 578);
+            refresh.Location = new Point(690, 42);
+            refresh.Size = new Size(88, 36);
             refresh.Click += async delegate { await RefreshAgentsAsync(); };
             Controls.Add(refresh);
-            ConfigureButton(close, "Close", 695, Color.FromArgb(51, 65, 85));
-            close.Location = new Point(695, 578);
-            close.Click += delegate { Close(); };
-            Controls.Add(close);
+            ConfigureButton(desktopShortcut, "Desktop shortcut", 450, Color.FromArgb(51, 65, 85));
+            desktopShortcut.Location = new Point(550, 42);
+            desktopShortcut.Size = new Size(130, 36);
+            desktopShortcut.Click += delegate { CreateDesktopShortcut(); };
+            Controls.Add(desktopShortcut);
+            LinkLabel copyright = new LinkLabel();
+            copyright.Text = "© " + DateTime.Now.Year + " NeonX  |  v" + HubVersion;
+            copyright.LinkColor = Color.FromArgb(100, 116, 139);
+            copyright.ActiveLinkColor = Color.FromArgb(34, 211, 238);
+            copyright.LinkBehavior = LinkBehavior.NeverUnderline;
+            copyright.AutoSize = true;
+            copyright.LinkArea = new LinkArea(0, copyright.Text.Length);
+            copyright.Location = new Point(32, 568);
+            copyright.LinkClicked += delegate { OpenUrl("https://neonx.ai"); };
+            Controls.Add(copyright);
+
             FormClosing += OnFormClosing;
-            Shown += async delegate { await RefreshAgentsAsync(); };
+            Shown += async delegate { CreateFirstRunDesktopShortcut(); await RefreshAgentsAsync(); };
         }
 
         private async Task InstallAsync()
@@ -203,7 +234,7 @@ namespace NeonX.OpenClawInstaller
                     throw new InvalidOperationException("System Node.js was not found. Return to the agent card and use Install Node.");
                 string nodeVersion = LastNonEmptyLine(node.Output);
                 if (!IsSupportedNodeVersion(nodeVersion))
-                    throw new InvalidOperationException("Node.js " + nodeVersion + " is not supported by OpenClaw " + Version + ". Required: >=22.22.3 <23, >=24.15.0 <25, or >=25.9.0.");
+                    throw new InvalidOperationException("Node.js " + nodeVersion + " is not supported by OpenClaw " + Version + ". Required: Node 22.22.3-22.x, 24.15.0-24.x, or 25.9.0+.");
                 CommandResult npm = await RunCaptureAsync(RefreshPath() + "; npm --version");
                 if (npm.ExitCode != 0)
                     throw new InvalidOperationException("npm was not found in the system PATH. Install Node.js with npm, then click Refresh.");
@@ -213,13 +244,16 @@ namespace NeonX.OpenClawInstaller
                 SetStatus("Step 2/4 - Installing OpenClaw with system npm");
                 Write("Running npm install -g openclaw@" + Version);
                 int code = await RunAsync("-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command " + Quote(RefreshPath() + "; npm install -g openclaw@" + Version), logPath);
-                if (code != 0) throw new InvalidOperationException("npm returned error code " + code + ".");
+                if (code != 0) throw new InvalidOperationException("npm returned error code " + code + ". See the detailed log: " + logPath);
+                CommandResult installedOpenClaw = await RunOpenClawCaptureAsync("--version");
+                if (installedOpenClaw.ExitCode != 0 || !IsSupportedNodeVersion(nodeVersion))
+                    throw new InvalidOperationException("OpenClaw could not be verified after installation. Node " + nodeVersion + " does not satisfy its engine requirement. See the detailed log: " + logPath);
 
                 SetStatus("Step 3/4 - Installing the OpenClaw Codex plugin");
                 Write("Running openclaw plugins install @openclaw/codex@" + CodexPluginVersion);
-                string installCodexPlugin = RefreshPath() + "; openclaw plugins install @openclaw/codex@" + CodexPluginVersion + " --pin --accept-capabilities";
+                string installCodexPlugin = RefreshPath() + "; openclaw plugins install @openclaw/codex@" + CodexPluginVersion + " --pin --accept-capabilities --acknowledge-install-policy-warning";
                 code = await RunAsync("-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command " + Quote(installCodexPlugin), logPath);
-                if (code != 0) throw new InvalidOperationException("Codex plugin installation returned error code " + code + ".");
+                if (code != 0) throw new InvalidOperationException("Codex plugin installation returned error code " + code + ". See the detailed log: " + logPath);
 
                 SetStatus("Step 4/4 - Checking OpenClaw and the Codex plugin");
                 string verify = RefreshPath() + "; $c=Get-Command openclaw -ErrorAction SilentlyContinue; if(!$c){exit 127}; & $c.Source --version";
@@ -310,9 +344,9 @@ namespace NeonX.OpenClawInstaller
                 File.WriteAllText(logPath, "NeonX Agent Hub " + DateTime.Now + Environment.NewLine, Encoding.UTF8);
                 SetStatus("Installing @openclaw/codex " + CodexPluginVersion);
                 Write("Running openclaw plugins install @openclaw/codex@" + CodexPluginVersion);
-                string installPlugin = RefreshPath() + "; openclaw plugins install @openclaw/codex@" + CodexPluginVersion + " --pin --accept-capabilities";
+                string installPlugin = RefreshPath() + "; openclaw plugins install @openclaw/codex@" + CodexPluginVersion + " --pin --accept-capabilities --acknowledge-install-policy-warning";
                 int code = await RunAsync("-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command " + Quote(installPlugin), logPath);
-                if (code != 0) throw new InvalidOperationException("Codex plugin installation returned error code " + code + ".");
+                if (code != 0) throw new InvalidOperationException("Codex plugin installation returned error code " + code + ". See the detailed log: " + logPath);
 
                 string verify = RefreshPath() + "; openclaw plugins inspect codex --json";
                 code = await RunAsync("-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command " + Quote(verify), logPath);
@@ -343,6 +377,133 @@ namespace NeonX.OpenClawInstaller
 
             await RefreshAgentsAsync();
             if (installed && openClawInstalled && openClawConfigured) await OpenDashboardAsync();
+        }
+
+        private async Task UpdateOpenClawAsync()
+        {
+            if (busy) return;
+            DialogResult answer = MessageBox.Show(
+                "OpenClaw may change its configuration format during an upgrade. Your current settings could require review or reconfiguration afterward.\r\n\r\nInstalled version: "
+                    + (string.IsNullOrWhiteSpace(detectedOpenClawVersion) ? "unknown" : detectedOpenClawVersion)
+                    + "\r\nTarget version: " + Version + "\r\n\r\nContinue with the upgrade?",
+                "Confirm OpenClaw upgrade", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+            if (answer != DialogResult.Yes) return;
+
+            LaunchOpenClawUpgradeTerminal();
+            Close();
+            return;
+
+            busy = true;
+            SetEnabled(false);
+            install.Text = "Updating...";
+            progress.Style = ProgressBarStyle.Marquee;
+            log.Clear();
+            string directory = Path.Combine(Path.GetTempPath(), "NeonX", "OpenClaw-" + Version);
+            string logPath = Path.Combine(directory, "NeonX-OpenClaw-update.log");
+
+            try
+            {
+                Directory.CreateDirectory(directory);
+                File.WriteAllText(logPath, "NeonX Agent Hub " + DateTime.Now + Environment.NewLine, Encoding.UTF8);
+                SetStatus("Stopping the gateway before updating...");
+                Write("Stopping any running gateway so the update can apply...");
+                await StopOpenClawGatewayAsync();
+                await Task.Delay(500);
+
+                SetStatus("Step 1/3 - Checking system Node.js and npm");
+                CommandResult node = await RunCaptureAsync(RefreshPath() + "; node --version");
+                if (node.ExitCode != 0)
+                    throw new InvalidOperationException("System Node.js was not found. Return to the agent card and use Install Node.");
+                string nodeVersion = LastNonEmptyLine(node.Output);
+                if (!IsSupportedNodeVersion(nodeVersion))
+                    throw new InvalidOperationException("Node.js " + nodeVersion + " is not supported by OpenClaw " + Version + ". Required: Node 22.22.3-22.x, 24.15.0-24.x, or 25.9.0+.");
+                CommandResult npm = await RunCaptureAsync(RefreshPath() + "; npm --version");
+                if (npm.ExitCode != 0)
+                    throw new InvalidOperationException("npm was not found in the system PATH. Install Node.js with npm.");
+                Write("[OK] node --version: " + nodeVersion);
+                Write("[OK] npm --version: " + LastNonEmptyLine(npm.Output));
+
+                SetStatus("Step 2/3 - Updating OpenClaw to " + Version);
+                Write("Running npm install -g openclaw@" + Version);
+                int code = await RunAsync("-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command " + Quote(RefreshPath() + "; npm install -g openclaw@" + Version), logPath);
+                if (code != 0) throw new InvalidOperationException("npm returned error code " + code + ". See the detailed log: " + logPath);
+                CommandResult installedOpenClaw = await RunOpenClawCaptureAsync("--version");
+                if (installedOpenClaw.ExitCode != 0)
+                    throw new InvalidOperationException("OpenClaw could not be verified after update. See the detailed log: " + logPath);
+
+                Write("Running openclaw plugins install @openclaw/codex@" + CodexPluginVersion);
+                string installCodexPlugin = RefreshPath() + "; openclaw plugins install @openclaw/codex@" + CodexPluginVersion + " --pin --accept-capabilities --acknowledge-install-policy-warning";
+                code = await RunAsync("-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command " + Quote(installCodexPlugin), logPath);
+                if (code != 0) throw new InvalidOperationException("Codex plugin installation returned error code " + code + ". See the detailed log: " + logPath);
+
+                SetStatus("Step 3/3 - Verifying the update");
+                string verify = RefreshPath() + "; $c=Get-Command openclaw -ErrorAction SilentlyContinue; if(!$c){exit 127}; & $c.Source --version";
+                code = await RunAsync("-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command " + Quote(verify), logPath);
+                if (code != 0) throw new InvalidOperationException("Could not verify openclaw --version.");
+                string verifyCodex = RefreshPath() + "; openclaw plugins inspect codex --json";
+                code = await RunAsync("-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command " + Quote(verifyCodex), logPath);
+                if (code != 0) throw new InvalidOperationException("Could not verify the OpenClaw Codex plugin.");
+
+                await ConfigureCodexPluginAsync();
+
+                progress.Style = ProgressBarStyle.Blocks;
+                progress.Value = 100;
+                SetStatus("OpenClaw updated to " + Version);
+                Write("[COMPLETE] OpenClaw updated to " + Version + ".");
+                MessageBox.Show("OpenClaw was updated to " + Version + ".", "NeonX Agent Hub", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception error)
+            {
+                progress.Style = ProgressBarStyle.Blocks;
+                progress.Value = 0;
+                SetStatus("Update did not complete");
+                Write("[ERROR] " + error.Message);
+                AppendFile(logPath, "[ERROR] " + error);
+                MessageBox.Show(error.Message + "\r\n\r\nUpdate log:\r\n" + logPath, "Update failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                busy = false;
+                SetEnabled(true);
+                install.Enabled = true;
+            }
+
+            await RefreshAgentsAsync();
+        }
+
+        private void LaunchOpenClawUpgradeTerminal()
+        {
+            string directory = Path.Combine(Path.GetTempPath(), "NeonX", "OpenClaw-" + Version);
+            Directory.CreateDirectory(directory);
+            string scriptPath = Path.Combine(directory, "upgrade-openclaw.ps1");
+            string logPath = Path.Combine(directory, "NeonX-OpenClaw-update.log");
+            string script = @"
+$ErrorActionPreference = 'Stop'
+Write-Host 'NeonX Agent Hub - OpenClaw upgrade' -ForegroundColor Cyan
+Write-Host 'The application has been closed. Keep this window open until the upgrade finishes.'
+try {
+  $required = '" + Version + @"'
+  node --version
+  npm --version
+  npm install -g openclaw@" + Version + @"
+  openclaw plugins install @openclaw/codex@" + CodexPluginVersion + @" --pin --accept-capabilities --acknowledge-install-policy-warning
+  openclaw --version
+  openclaw plugins inspect codex --json | Out-Null
+  Write-Host ('OpenClaw upgrade completed successfully: ' + $required) -ForegroundColor Green
+} catch {
+  Write-Host ('Upgrade failed: ' + $_.Exception.Message) -ForegroundColor Red
+  exit 1
+}
+Read-Host 'Press Enter to close this terminal'
+";
+            File.WriteAllText(scriptPath, script, Encoding.UTF8);
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "powershell.exe",
+                Arguments = "-NoProfile -ExecutionPolicy Bypass -File " + Quote(scriptPath),
+                UseShellExecute = true,
+                WorkingDirectory = directory
+            });
         }
 
         private async Task InstallNodeAsync()
@@ -468,7 +629,7 @@ namespace NeonX.OpenClawInstaller
             }
             else if (node.ExitCode == 0)
             {
-                nodeStatus.Text = "Node.js: " + nodeVersion + " - needs 24.15+; Node 26 recommended";
+                nodeStatus.Text = "Node.js: " + nodeVersion + " - requires Node 22.22.3-22.x, 24.15.0-24.x, or 25.9.0+";
                 nodeStatus.ForeColor = Color.FromArgb(248, 113, 113);
             }
             else
@@ -493,15 +654,21 @@ namespace NeonX.OpenClawInstaller
             if (openClawInstalled)
             {
                 string installedVersion = LastNonEmptyLine(result.Output);
+                detectedOpenClawVersion = installedVersion;
+                openClawUpdateAvailable = IsUpdateAvailable(installedVersion, Version);
                 openClawConfigured = IsOpenClawConfigured();
                 openClawStatus.Text = openClawConfigured
                     ? "OpenClaw: installed" + (installedVersion.Length > 0 ? " - version " + installedVersion : "")
                     : "OpenClaw: installed - onboarding required";
                 openClawStatus.ForeColor = Color.FromArgb(74, 222, 128);
                 install.Text = !codexInstalled ? "Install Codex" : (openClawConfigured ? "Open" : "Onboard");
+                updateLink.Visible = openClawUpdateAvailable;
+                addModel.Visible = false;
                 SetStatus(!codexInstalled
                     ? "The OpenClaw Codex plugin is included by default and still needs to be installed"
-                    : (openClawConfigured ? "OpenClaw is installed and ready" : "Complete OpenClaw onboarding before opening the dashboard"));
+                    : (openClawUpdateAvailable
+                        ? "A newer OpenClaw version (" + Version + ") is available - update when you are ready"
+                        : (openClawConfigured ? "OpenClaw is installed and ready" : "Complete OpenClaw onboarding before opening the dashboard")));
             }
             else
             {
@@ -509,6 +676,8 @@ namespace NeonX.OpenClawInstaller
                 openClawStatus.Text = "OpenClaw: not installed";
                 openClawStatus.ForeColor = Color.FromArgb(248, 113, 113);
                 install.Text = nodeReady ? "Install" : (nodeDetected ? "Upgrade Node" : "Install Node");
+                updateLink.Visible = false;
+                addModel.Visible = false;
                 SetStatus(nodeReady
                     ? "OpenClaw is available to install"
                     : (nodeDetected
@@ -539,6 +708,7 @@ namespace NeonX.OpenClawInstaller
             SetStatus("Open 1/5 - Checking installed components");
             Write("[OPEN 1/5] OpenClaw and the Codex plugin are installed.");
             Write("  - Codex configuration is preserved; no plugin settings are rewritten during Open.");
+            await EnsureDefaultNeonxModelsAsync();
 
             progress.Value = 25;
             SetStatus("Open 2/5 - Checking local gateway configuration");
@@ -567,8 +737,10 @@ namespace NeonX.OpenClawInstaller
             Write("Gateway port: " + gatewayPort);
 
             progress.Value = 65;
-            SetStatus("Open 4/5 - Starting the OpenClaw gateway");
-            Write("[OPEN 4/5] Starting the local gateway process...");
+            SetStatus("Open 4/5 - Restarting the OpenClaw gateway");
+            Write("[OPEN 4/5] Stopping any existing gateway, then starting fresh so new settings apply...");
+            await StopOpenClawGatewayAsync();
+            await Task.Delay(1500);
             string gatewayError;
             if (!StartOpenClawGateway(gatewayPort, out gatewayError))
             {
@@ -581,11 +753,22 @@ namespace NeonX.OpenClawInstaller
             progress.Value = 80;
             SetStatus("Open 5/5 - Waiting for the Control UI");
             Write("[OPEN 5/5] Gateway process started. Waiting for the Control UI...");
-            if (!await WaitForGatewayAsync(gatewayPort))
+            bool gatewayReady = await WaitForGatewayAsync(gatewayPort);
+            if (!gatewayReady)
             {
-                ShowDashboardError(new CommandResult(1, "", "The OpenClaw gateway did not become ready. Check the OpenClaw gateway log for details."));
+                Write("[RETRY] The gateway was not ready on the first attempt. Restarting it once...");
+                await StopOpenClawGatewayAsync();
+                await Task.Delay(1000);
+                if (StartOpenClawGateway(gatewayPort, out gatewayError))
+                    gatewayReady = await WaitForGatewayAsync(gatewayPort);
+                if (!gatewayReady)
+                {
+                    ShowDashboardError(new CommandResult(1, "", string.IsNullOrWhiteSpace(gatewayError)
+                        ? "The OpenClaw gateway did not become ready after two attempts. Check the OpenClaw gateway log for details."
+                        : gatewayError));
+                }
             }
-            else
+            if (gatewayReady)
             {
                 string browserUrl = "http://127.0.0.1:" + gatewayPort + "/#token=" + Uri.EscapeDataString(gatewayToken);
                 if (!OpenUrl(browserUrl))
@@ -617,7 +800,7 @@ namespace NeonX.OpenClawInstaller
 
             try
             {
-                CommandResult result = await RunOpenClawCaptureAsync("gateway stop");
+                CommandResult result = await RunOpenClawCaptureAsync("gateway stop --force");
                 StopOwnedGatewayProcess();
                 if (result.ExitCode != 0)
                 {
@@ -638,6 +821,21 @@ namespace NeonX.OpenClawInstaller
             }
         }
 
+        private async Task StopOpenClawGatewayAsync()
+        {
+            StopOwnedGatewayProcess();
+            try
+            {
+                CommandResult result = await RunOpenClawCaptureAsync("gateway stop --force");
+                if (result.ExitCode != 0)
+                {
+                    string details = StripPowerShellClixml(string.IsNullOrWhiteSpace(result.Error) ? result.Output : result.Error);
+                    if (!string.IsNullOrWhiteSpace(details)) Write("  - gateway stop: " + details);
+                }
+            }
+            catch { }
+        }
+
         private void ShowDashboardError(CommandResult result)
         {
             progress.Style = ProgressBarStyle.Blocks;
@@ -649,6 +847,43 @@ namespace NeonX.OpenClawInstaller
             if (string.IsNullOrWhiteSpace(details)) details = "OpenClaw did not provide an error message.";
             Write("[ERROR] " + details);
             MessageBox.Show("Could not open the OpenClaw dashboard.\r\n\r\n" + details, "Open failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+
+        private async Task EnsureDefaultNeonxModelsAsync()
+        {
+            string models = "[{\"id\":\"gpt-5.6-terra\",\"name\":\"gpt-5.6-terra\"},{\"id\":\"gpt-5.6-sol\",\"name\":\"gpt-5.6-sol\"},{\"id\":\"gpt-5.6-luna\",\"name\":\"gpt-5.6-luna\"},{\"id\":\"deepseek-v4-flash\",\"name\":\"deepseek-v4-flash\"}]";
+            CommandResult result = await RunOpenClawCaptureAsync("config set models.providers.neonx.models \"" + models.Replace("\"", "\\\"") + "\" --strict-json");
+            if (result.ExitCode == 0) Write("  - Default neonx models synchronized.");
+            else Write("  - Could not synchronize default neonx models: " + StripPowerShellClixml(result.Error));
+        }
+
+        private async Task AddModelAsync()
+        {
+            using (Form dialog = new Form())
+            {
+                dialog.Text = "Add OpenClaw model";
+                dialog.ClientSize = new Size(420, 145);
+                dialog.StartPosition = FormStartPosition.CenterParent;
+                dialog.FormBorderStyle = FormBorderStyle.FixedDialog;
+                dialog.MinimizeBox = false;
+                dialog.MaximizeBox = false;
+                Label title = new Label { Text = "Model ID (provider neonx)", Location = new Point(16, 16), AutoSize = true };
+                TextBox model = new TextBox { Location = new Point(16, 42), Width = 388 };
+                Button save = new Button { Text = "Save", Location = new Point(224, 82), Width = 85, DialogResult = DialogResult.OK };
+                Button cancel = new Button { Text = "Cancel", Location = new Point(319, 82), Width = 85, DialogResult = DialogResult.Cancel };
+                dialog.Controls.Add(title); dialog.Controls.Add(model); dialog.Controls.Add(save); dialog.Controls.Add(cancel);
+                if (dialog.ShowDialog(this) != DialogResult.OK || string.IsNullOrWhiteSpace(model.Text)) return;
+                string modelId = model.Text.Trim();
+                string modelJson = "[{\"id\":\"gpt-5.6-terra\",\"name\":\"gpt-5.6-terra\"},{\"id\":\"gpt-5.6-sol\",\"name\":\"gpt-5.6-sol\"},{\"id\":\"gpt-5.6-luna\",\"name\":\"gpt-5.6-luna\"},{\"id\":\"deepseek-v4-flash\",\"name\":\"deepseek-v4-flash\"},{\"id\":\"" + JsonEscape(modelId) + "\",\"name\":\"" + JsonEscape(modelId) + "\"}]";
+                CommandResult result = await RunOpenClawCaptureAsync("config set models.providers.neonx.models \"" + modelJson.Replace("\"", "\\\"") + "\" --strict-json");
+                if (result.ExitCode != 0) { MessageBox.Show(StripPowerShellClixml(result.Error), "Could not add model", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
+                MessageBox.Show("Model added successfully: neonx/" + modelId, "Model added", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+        }
+
+        private static string JsonEscape(string value)
+        {
+            return value.Replace("\\", "\\\\").Replace("\"", "\\\"");
         }
 
         private async Task ConfigureCodexPluginAsync()
@@ -681,8 +916,8 @@ namespace NeonX.OpenClawInstaller
             Write("  - Codex setting applied: plugin enabled.");
 
             Write("  - Applying default provider: neonx...");
-            string neonxProviderJson = "{\"api\":\"openai-completions\",\"baseUrl\":\"https://api.neonx.ai/v1\",\"models\":[{\"id\":\"gpt-5.6-terra\",\"name\":\"gpt-5.6-terra\"}]}";
-            string neonxProviderCommand = "config set models.providers.neonx \"" + neonxProviderJson.Replace("\"", "\\\"") + "\" --strict-json --expect-current-absent";
+            string neonxProviderJson = "{\"api\":\"openai-completions\",\"baseUrl\":\"https://api.neonx.ai/v1\",\"auth\":\"api-key\",\"authHeader\":true,\"headers\":{\"User-Agent\":\"neonx-agent/1.0\"},\"models\":[{\"id\":\"gpt-5.6-terra\",\"name\":\"gpt-5.6-terra\"},{\"id\":\"gpt-5.6-sol\",\"name\":\"gpt-5.6-sol\"},{\"id\":\"gpt-5.6-luna\",\"name\":\"gpt-5.6-luna\"},{\"id\":\"deepseek-v4-flash\",\"name\":\"deepseek-v4-flash\"}]}";
+            string neonxProviderCommand = "config set models.providers.neonx \"" + neonxProviderJson.Replace("\"", "\\\"") + "\" --strict-json";
             CommandResult provider = await RunOpenClawCaptureAsync(neonxProviderCommand);
             if (provider.ExitCode != 0)
             {
@@ -792,8 +1027,12 @@ namespace NeonX.OpenClawInstaller
             error = "";
             try
             {
-                if (gatewayProcess != null && !gatewayProcess.HasExited && gatewayToken.Length > 0 && gatewayPort == port) return true;
-                if (gatewayProcess != null) gatewayProcess.Dispose();
+                if (gatewayProcess != null)
+                {
+                    try { if (!gatewayProcess.HasExited) gatewayProcess.Kill(); } catch { }
+                    gatewayProcess.Dispose();
+                    gatewayProcess = null;
+                }
 
                 string nodePath = FindNodeExecutablePath();
                 string openClawEntry = FindOpenClawEntryPath();
@@ -802,13 +1041,30 @@ namespace NeonX.OpenClawInstaller
 
                 gatewayToken = CreateGatewayToken();
                 gatewayPort = port;
-                ProcessStartInfo info = new ProcessStartInfo(nodePath, Quote(openClawEntry) + " gateway run --force --auth token --port " + port + " --ws-log compact");
+                ProcessStartInfo info = new ProcessStartInfo(nodePath, Quote(openClawEntry) + " gateway run --force --auth token --token " + Quote(gatewayToken) + " --port " + port + " --ws-log compact");
                 info.UseShellExecute = false;
                 info.CreateNoWindow = true;
                 info.WindowStyle = ProcessWindowStyle.Hidden;
+                info.RedirectStandardOutput = true;
+                info.RedirectStandardError = true;
+                info.StandardOutputEncoding = Encoding.UTF8;
+                info.StandardErrorEncoding = Encoding.UTF8;
                 info.WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
                 info.EnvironmentVariables["OPENCLAW_GATEWAY_TOKEN"] = gatewayToken;
                 gatewayProcess = Process.Start(info);
+                if (gatewayProcess != null)
+                {
+                    gatewayProcess.OutputDataReceived += delegate(object sender, DataReceivedEventArgs eventArgs)
+                    {
+                        if (!string.IsNullOrWhiteSpace(eventArgs.Data)) Write("[gateway] " + eventArgs.Data);
+                    };
+                    gatewayProcess.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs eventArgs)
+                    {
+                        if (!string.IsNullOrWhiteSpace(eventArgs.Data)) Write("[gateway error] " + eventArgs.Data);
+                    };
+                    gatewayProcess.BeginOutputReadLine();
+                    gatewayProcess.BeginErrorReadLine();
+                }
                 return gatewayProcess != null;
             }
             catch (Exception exception)
@@ -847,7 +1103,7 @@ namespace NeonX.OpenClawInstaller
                 string openClawEntry = FindOpenClawEntryPath();
                 if (nodePath.Length == 0 || openClawEntry.Length == 0) return;
 
-                ProcessStartInfo info = new ProcessStartInfo(nodePath, Quote(openClawEntry) + " gateway stop");
+                ProcessStartInfo info = new ProcessStartInfo(nodePath, Quote(openClawEntry) + " gateway stop --force");
                 info.UseShellExecute = false;
                 info.CreateNoWindow = true;
                 using (Process process = Process.Start(info))
@@ -910,6 +1166,27 @@ namespace NeonX.OpenClawInstaller
             return lines.Length == 0 ? "" : lines[lines.Length - 1].Trim().TrimStart('v');
         }
 
+        private static bool IsUpdateAvailable(string installedVersion, string targetVersion)
+        {
+            int[] installed = ParseSemanticVersion(installedVersion);
+            int[] target = ParseSemanticVersion(targetVersion);
+            if (installed == null || target == null) return false;
+            for (int index = 0; index < 3; index++)
+            {
+                if (installed[index] != target[index]) return installed[index] < target[index];
+            }
+            return false;
+        }
+
+        private static int[] ParseSemanticVersion(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return null;
+            System.Text.RegularExpressions.Match match = System.Text.RegularExpressions.Regex.Match(
+                value, @"(?:^|[^0-9])v?(\d+)\.(\d+)\.(\d+)(?![0-9])");
+            if (!match.Success) return null;
+            return new[] { int.Parse(match.Groups[1].Value), int.Parse(match.Groups[2].Value), int.Parse(match.Groups[3].Value) };
+        }
+
         private static bool IsSupportedNodeVersion(string value)
         {
             try
@@ -917,7 +1194,8 @@ namespace NeonX.OpenClawInstaller
                 Version version = new Version((value ?? "").Trim().TrimStart('v'));
                 if (version.Major == 22) return version.CompareTo(new Version(22, 22, 3)) >= 0;
                 if (version.Major == 24) return version.CompareTo(new Version(24, 15, 0)) >= 0;
-                return version.CompareTo(new Version(25, 9, 0)) >= 0;
+                if (version.Major == 25) return version.CompareTo(new Version(25, 9, 0)) >= 0;
+                return version.Major > 25;
             }
             catch { return false; }
         }
@@ -1136,12 +1414,51 @@ namespace NeonX.OpenClawInstaller
             button.FlatAppearance.BorderSize = 0;
         }
 
+        private void CreateFirstRunDesktopShortcut()
+        {
+            string settingsDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NeonX", "AgentHub");
+            string markerPath = Path.Combine(settingsDirectory, "desktop-shortcut-created");
+            if (File.Exists(markerPath)) return;
+            if (!CreateDesktopShortcut(false)) return;
+            Directory.CreateDirectory(settingsDirectory);
+            File.WriteAllText(markerPath, DateTime.UtcNow.ToString("O"), Encoding.UTF8);
+        }
+
+        private bool CreateDesktopShortcut(bool notify = true)
+        {
+            try
+            {
+                string targetPath = Application.ExecutablePath;
+                string desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+                string shortcutPath = Path.Combine(desktopPath, "NeonX Agent Hub.lnk");
+                Type shellType = Type.GetTypeFromProgID("WScript.Shell");
+                if (shellType == null) throw new InvalidOperationException("Windows Script Host is unavailable.");
+
+                object shell = Activator.CreateInstance(shellType);
+                object shortcut = shell.GetType().InvokeMember("CreateShortcut", System.Reflection.BindingFlags.InvokeMethod, null, shell, new object[] { shortcutPath });
+                Type shortcutType = shortcut.GetType();
+                shortcutType.InvokeMember("TargetPath", System.Reflection.BindingFlags.SetProperty, null, shortcut, new object[] { targetPath });
+                shortcutType.InvokeMember("WorkingDirectory", System.Reflection.BindingFlags.SetProperty, null, shortcut, new object[] { Path.GetDirectoryName(targetPath) });
+                shortcutType.InvokeMember("IconLocation", System.Reflection.BindingFlags.SetProperty, null, shortcut, new object[] { targetPath + ",0" });
+                shortcutType.InvokeMember("Save", System.Reflection.BindingFlags.InvokeMethod, null, shortcut, null);
+                if (notify) MessageBox.Show("Desktop shortcut created.", "NeonX Agent Hub", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return true;
+            }
+            catch (Exception error)
+            {
+                if (notify) MessageBox.Show("Could not create the desktop shortcut.\r\n\r\n" + error.Message, "Shortcut failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return false;
+            }
+        }
+
         private void SetEnabled(bool enabled)
         {
             install.Enabled = enabled;
+            updateLink.Enabled = enabled && updateLink.Visible;
             stop.Enabled = enabled && openClawInstalled;
             close.Enabled = enabled;
             refresh.Enabled = enabled;
+            desktopShortcut.Enabled = enabled;
             source.Enabled = enabled;
             ControlBox = enabled;
         }
