@@ -96,7 +96,7 @@ namespace NeonX.OpenClawInstaller
 
             RoundedPanel card = new RoundedPanel();
             card.Location = new Point(30, 120);
-            card.Size = new Size(760, 218);
+            card.Size = new Size(760, 194);
             card.BackColor = Color.FromArgb(30, 41, 59);
             card.BorderColor = Color.FromArgb(51, 65, 85);
             card.CornerRadius = 18;
@@ -106,36 +106,36 @@ namespace NeonX.OpenClawInstaller
             agentIcon.Image = LoadEmbeddedImage("OpenClawLogo");
             agentIcon.BackColor = card.BackColor;
             agentIcon.CornerRadius = 12;
-            agentIcon.Location = new Point(24, 32);
-            agentIcon.Size = new Size(58, 58);
+            agentIcon.Location = new Point(24, 24);
+            agentIcon.Size = new Size(54, 54);
             card.Controls.Add(agentIcon);
-            card.Controls.Add(MakeLabel("OpenClaw", 104, 20, 16F, Color.White));
-            card.Controls.Add(MakeLabel("Local AI agent gateway and control dashboard", 106, 55, 9F, Color.FromArgb(148, 163, 184)));
-            card.Controls.Add(MakeLabel("Target version " + Version, 106, 79, 8.5F, Color.FromArgb(100, 116, 139)));
+            card.Controls.Add(MakeLabel("OpenClaw", 104, 14, 16F, Color.White));
+            card.Controls.Add(MakeLabel("Local AI agent gateway and control dashboard", 106, 46, 9F, Color.FromArgb(148, 163, 184)));
+            card.Controls.Add(MakeLabel("Target version " + Version, 106, 67, 8.5F, Color.FromArgb(100, 116, 139)));
 
             nodeStatus.Text = "Node.js: checking...";
             nodeStatus.ForeColor = Color.FromArgb(251, 191, 36);
             nodeStatus.AutoSize = true;
             nodeStatus.Font = new Font("Segoe UI Semibold", 8.5F, FontStyle.Bold);
-            nodeStatus.Location = new Point(106, 101);
+            nodeStatus.Location = new Point(106, 88);
             card.Controls.Add(nodeStatus);
 
             openClawStatus.Text = "OpenClaw: checking...";
             openClawStatus.ForeColor = Color.FromArgb(251, 191, 36);
             openClawStatus.AutoSize = true;
             openClawStatus.Font = new Font("Segoe UI Semibold", 8.5F, FontStyle.Bold);
-            openClawStatus.Location = new Point(106, 124);
+            openClawStatus.Location = new Point(106, 109);
             card.Controls.Add(openClawStatus);
 
             codexStatus.Text = "Codex plugin: checking...";
             codexStatus.ForeColor = Color.FromArgb(251, 191, 36);
             codexStatus.AutoSize = true;
             codexStatus.Font = new Font("Segoe UI Semibold", 8.5F, FontStyle.Bold);
-            codexStatus.Location = new Point(106, 147);
+            codexStatus.Location = new Point(106, 130);
             card.Controls.Add(codexStatus);
 
             ConfigureButton(install, "Checking...", 0, Color.FromArgb(8, 145, 178));
-            install.Location = new Point(620, 53);
+            install.Location = new Point(620, 42);
             install.Size = new Size(112, 42);
             install.Enabled = false;
             install.Click += async delegate { await HandleOpenClawActionAsync(); };
@@ -146,13 +146,13 @@ namespace NeonX.OpenClawInstaller
             updateLink.ActiveLinkColor = Color.White;
             updateLink.AutoSize = true;
             updateLink.Font = new Font("Segoe UI", 8.5F);
-            updateLink.Location = new Point(300, 79);
+            updateLink.Location = new Point(300, 67);
             updateLink.Visible = false;
             updateLink.LinkClicked += async delegate { await UpdateOpenClawAsync(); };
             card.Controls.Add(updateLink);
 
             ConfigureButton(stop, "Stop", 0, Color.FromArgb(185, 28, 28));
-            stop.Location = new Point(500, 53);
+            stop.Location = new Point(500, 42);
             stop.Size = new Size(110, 42);
             stop.Enabled = false;
             stop.Visible = false;
@@ -160,7 +160,7 @@ namespace NeonX.OpenClawInstaller
             card.Controls.Add(stop);
 
             ConfigureButton(addModel, "+  Add model", 500, Color.FromArgb(14, 116, 144));
-            addModel.Location = new Point(106, 174);
+            addModel.Location = new Point(106, 154);
             addModel.Size = new Size(132, 32);
             addModel.Font = new Font("Segoe UI Semibold", 8.5F, FontStyle.Bold);
             addModel.Click += async delegate { await AddModelAsync(); };
