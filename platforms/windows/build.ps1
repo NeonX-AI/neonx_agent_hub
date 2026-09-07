@@ -162,7 +162,7 @@ Write-Host "Building $output ..." -ForegroundColor Cyan
 & $compiler /nologo /target:winexe /optimize+ /platform:anycpu /win32manifest:"$manifest" `
     /win32icon:"$icon" /reference:System.dll /reference:System.Core.dll `
     /reference:System.Drawing.dll /reference:System.Windows.Forms.dll `
-    /resource:"$logo",NeonXLogo /resource:"$openClawLogo",OpenClawLogo `
+    /resource:$logo,NeonXLogo /resource:$openClawLogo,OpenClawLogo `
     /out:"$output" "$source" "$generatedVersions"
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $output)) { throw "Build failed: $LASTEXITCODE" }
 

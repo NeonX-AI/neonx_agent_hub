@@ -172,6 +172,7 @@ namespace NeonX.OpenClawInstaller
             status.AutoSize = true;
             status.Location = new Point(32, 320);
             Controls.Add(status);
+            status.BringToFront();
             progress.Location = new Point(32, 348);
             progress.Size = new Size(756, 12);
             Controls.Add(progress);
@@ -1041,7 +1042,7 @@ Read-Host 'Press Enter to close this terminal'
 
                 gatewayToken = CreateGatewayToken();
                 gatewayPort = port;
-                ProcessStartInfo info = new ProcessStartInfo(nodePath, Quote(openClawEntry) + " gateway run --force --auth token --token " + Quote(gatewayToken) + " --port " + port + " --ws-log compact");
+                ProcessStartInfo info = new ProcessStartInfo(nodePath, Quote(openClawEntry) + " gateway run --force --allow-unconfigured --auth token --token " + Quote(gatewayToken) + " --port " + port + " --ws-log compact");
                 info.UseShellExecute = false;
                 info.CreateNoWindow = true;
                 info.WindowStyle = ProcessWindowStyle.Hidden;
