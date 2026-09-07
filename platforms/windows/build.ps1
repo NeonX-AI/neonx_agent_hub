@@ -159,11 +159,24 @@ New-NeonXIcon -SourcePath $logo -DestinationPath $icon
 if (Test-Path -LiteralPath $output) { Remove-Item -LiteralPath $output -Force }
 
 Write-Host "Building $output ..." -ForegroundColor Cyan
-& $compiler /nologo /target:winexe /optimize+ /platform:anycpu /win32manifest:"$manifest" `
-    /win32icon:"$icon" /reference:System.dll /reference:System.Core.dll `
-    /reference:System.Drawing.dll /reference:System.Windows.Forms.dll `
-    /resource:$logo,NeonXLogo /resource:$openClawLogo,OpenClawLogo `
-    /out:"$output" "$source" "$generatedVersions"
+$compilerArguments = @(
+    "/nologo",
+    "/target:winexe",
+    "/optimize+",
+    "/platform:anycpu",
+    ("/win32manifest:{0}" -f $manifest),
+    ("/win32icon:{0}" -f $icon),
+    "/reference:System.dll",
+    "/reference:System.Core.dll",
+    "/reference:System.Drawing.dll",
+    "/reference:System.Windows.Forms.dll",
+    ("/resource:{0},NeonXLogo" -f $logo),
+    ("/resource:{0},OpenClawLogo" -f $openClawLogo),
+    ("/out:{0}" -f $output),
+    $source,
+    $generatedVersions
+)
+& $compiler @compilerArguments
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $output)) { throw "Build failed: $LASTEXITCODE" }
 
 if ($CertificatePath) {
