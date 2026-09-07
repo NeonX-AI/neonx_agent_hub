@@ -37,7 +37,17 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add config/versions.env
           git commit -m "chore: bump hub version to $next [skip ci]"
-          git push
+          git tag "v$next"
+          git push origin HEAD:main
+          git push origin "v$next"
+
+      - name: Read release version
+        id: version
+        shell: pwsh
+        run: |
+          $line = Get-Content config/versions.env | Where-Object { $_ -match '^NEONX_HUB_VERSION=' }
+          if (-not $line -or $line -notmatch '^NEONX_HUB_VERSION=(\d+\.\d+\.\d+)$') { throw "Invalid NEONX_HUB_VERSION" }
+          "version=$($Matches[1])" >> $env:GITHUB_OUTPUT
 
       - name: Build Windows executable
         shell: pwsh
@@ -46,7 +56,7 @@ jobs:
       - name: Package Windows release ZIP
         shell: pwsh
         run: |
-          $version = (Get-Content config/versions.env | Where-Object { $_ -match '^NEONX_HUB_VERSION=' }) -replace '^NEONX_HUB_VERSION=', ''
+          $version = "${{ steps.version.outputs.version }}"
           $package = "dist/windows/NeonX-Agent-Hub-windows-v$version.zip"
           Compress-Archive -Path dist/windows/NeonX-Agent-Hub.exe -DestinationPath $package -CompressionLevel Optimal
           Write-Host "Created $package"
@@ -59,9 +69,11 @@ jobs:
           if-no-files-found: error
 
       - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.create_release == true)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.create_release == true)
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: NeonX Agent Hub v${{ steps.version.outputs.version }}
           files: dist/windows/NeonX-Agent-Hub-windows-v*.zip
           generate_release_notes: true
           prerelease: false
