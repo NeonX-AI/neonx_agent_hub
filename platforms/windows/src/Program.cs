@@ -45,7 +45,7 @@ namespace NeonX.OpenClawInstaller
         private const string NodeArm64Sha256 = ComponentVersions.NodeArm64Sha256;
         private readonly Label status = new Label();
         private readonly ProgressBar progress = new ProgressBar();
-        private readonly TextBox log = new TextBox();
+        private readonly RichTextBox log = new RichTextBox();
         private readonly Button install = new Button();
         private readonly LinkLabel updateLink = new LinkLabel();
         private readonly Button stop = new Button();
@@ -181,12 +181,14 @@ namespace NeonX.OpenClawInstaller
             log.Size = new Size(756, 180);
             log.Multiline = true;
             log.ReadOnly = true;
-            log.ScrollBars = ScrollBars.Vertical;
+            log.ScrollBars = RichTextBoxScrollBars.Vertical;
+            log.DetectUrls = true;
+            log.HideSelection = false;
             log.BackColor = Color.FromArgb(2, 6, 23);
             log.ForeColor = Color.FromArgb(226, 232, 240);
             log.BorderStyle = BorderStyle.FixedSingle;
             log.Font = new Font("Consolas", 9F);
-            log.Text = "NeonX Agent Hub is ready." + Environment.NewLine;
+            Write("NeonX Agent Hub is ready.");
             Controls.Add(log);
 
             ConfigureButton(refresh, "Refresh", 572, Color.FromArgb(51, 65, 85));
@@ -856,6 +858,10 @@ Read-Host 'Press Enter to close this terminal'
             CommandResult result = await RunOpenClawCaptureAsync("config set models.providers.neonx.models \"" + models.Replace("\"", "\\\"") + "\" --strict-json");
             if (result.ExitCode == 0) Write("  - Default neonx models synchronized.");
             else Write("  - Could not synchronize default neonx models: " + StripPowerShellClixml(result.Error));
+
+            CommandResult memory = await RunOpenClawCaptureAsync("config set memory.search.provider none");
+            if (memory.ExitCode == 0) Write("  - Memory uses local FTS search; implicit OpenAI embeddings disabled.");
+            else Write("  - Could not disable implicit OpenAI memory embeddings: " + StripPowerShellClixml(memory.Error));
         }
 
         private async Task AddModelAsync()
@@ -943,6 +949,17 @@ Read-Host 'Press Enter to close this terminal'
             else
             {
                 Write("  - Default model neonx/gpt-5.6-terra selected.");
+            }
+            Write("  - Disabling implicit OpenAI memory embeddings (using local FTS-only memory)...");
+            CommandResult memory = await RunOpenClawCaptureAsync("config set memory.search.provider none");
+            if (memory.ExitCode != 0)
+            {
+                string memoryDetails = string.IsNullOrWhiteSpace(memory.Error) ? memory.Output : memory.Error;
+                Write("  - Could not set memory provider: " + StripPowerShellClixml(memoryDetails));
+            }
+            else
+            {
+                Write("  - Memory provider set to none; no OpenAI API key is required.");
             }
             Write("Codex plugin, session catalog, supervision, and the neonx provider are configured.");
         }
@@ -1477,7 +1494,16 @@ Read-Host 'Press Enter to close this terminal'
         private void Write(string text)
         {
             if (InvokeRequired) { BeginInvoke(new Action<string>(Write), text); return; }
-            log.AppendText(text + Environment.NewLine);
+            Color color = Color.FromArgb(226, 232, 240);
+            string normalized = (text ?? "").ToUpperInvariant();
+            if (normalized.Contains("[ERROR]") || normalized.Contains("[GATEWAY ERROR]") || normalized.Contains("FAILED")) color = Color.FromArgb(248, 113, 113);
+            else if (normalized.Contains("[OK]") || normalized.Contains("[COMPLETE]") || normalized.Contains("[READY]") || normalized.Contains("STARTUP COMPLETE") || normalized.Contains("RECOVERY STARTUP COMPLETE")) color = Color.FromArgb(74, 222, 128);
+            else if (normalized.Contains("[RETRY]") || normalized.Contains("WARNING")) color = Color.FromArgb(251, 191, 36);
+            else if (normalized.Contains("[OPEN ") || normalized.Contains("STEP ")) color = Color.FromArgb(103, 232, 249);
+            log.SelectionStart = log.TextLength;
+            log.SelectionLength = 0;
+            log.SelectionColor = color;
+            log.AppendText((text ?? "") + Environment.NewLine);
             log.SelectionStart = log.TextLength;
             log.ScrollToCaret();
         }
