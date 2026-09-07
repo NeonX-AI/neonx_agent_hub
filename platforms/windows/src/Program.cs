@@ -1057,7 +1057,8 @@ Read-Host 'Press Enter to close this terminal'
                 if (nodePath.Length == 0) { error = "System node.exe was not found."; return false; }
                 if (openClawEntry.Length == 0) { error = "The OpenClaw package entry point was not found."; return false; }
 
-                gatewayToken = CreateGatewayToken();
+                // Keep one per-user token so an already-open Control UI does not retain a stale token.
+                gatewayToken = LoadOrCreateGatewayToken();
                 gatewayPort = port;
                 ProcessStartInfo info = new ProcessStartInfo(nodePath, Quote(openClawEntry) + " gateway run --force --allow-unconfigured --auth token --token " + Quote(gatewayToken) + " --port " + port + " --ws-log compact");
                 info.UseShellExecute = false;
@@ -1169,6 +1170,25 @@ Read-Host 'Press Enter to close this terminal'
                 await Task.Delay(500);
             }
             return false;
+        }
+
+        private static string LoadOrCreateGatewayToken()
+        {
+            string directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NeonX", "AgentHub");
+            string path = Path.Combine(directory, "gateway-token");
+            try
+            {
+                if (File.Exists(path))
+                {
+                    string existing = File.ReadAllText(path, Encoding.ASCII).Trim();
+                    if (existing.Length >= 32) return existing;
+                }
+                Directory.CreateDirectory(directory);
+                string token = CreateGatewayToken();
+                File.WriteAllText(path, token, Encoding.ASCII);
+                return token;
+            }
+            catch { return CreateGatewayToken(); }
         }
 
         private static string CreateGatewayToken()
