@@ -43,6 +43,7 @@ namespace NeonX.OpenClawInstaller
         private const string RecommendedNodeVersion = ComponentVersions.NodeJsDistribution;
         private const string NodeX64Sha256 = ComponentVersions.NodeX64Sha256;
         private const string NodeArm64Sha256 = ComponentVersions.NodeArm64Sha256;
+        private const int ModelTimeoutSeconds = 600;
         private readonly Label status = new Label();
         private readonly ProgressBar progress = new ProgressBar();
         private readonly RichTextBox log = new RichTextBox();
@@ -908,9 +909,10 @@ Read-Host 'Press Enter to close this terminal'
             string[] configCommands =
             {
                 "config set plugins.entries.codex.config.sessionCatalog.enabled true",
-                "config set plugins.entries.codex.config.supervision.enabled true"
+                "config set plugins.entries.codex.config.supervision.enabled true",
+                "config set agents.defaults.timeoutSeconds " + ModelTimeoutSeconds
             };
-            string[] configDescriptions = { "session catalog enabled", "supervision enabled" };
+            string[] configDescriptions = { "session catalog enabled", "supervision enabled", "model timeout set to 10 minutes" };
             for (int index = 0; index < configCommands.Length; index++)
             {
                 Write("  - Applying Codex setting: " + configDescriptions[index] + "...");

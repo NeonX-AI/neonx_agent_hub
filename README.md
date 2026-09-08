@@ -44,6 +44,7 @@ build.ps1                 Platform-aware root build entry point
 - OpenClaw `2026.9.1` installation through the existing system `npm` command.
 - Codex plugin `2026.9.1` installation through `openclaw plugins install @openclaw/codex@2026.9.1 --pin`.
 - Explicit Codex plugin activation with native session catalog and supervision enabled before the Gateway starts.
+- A 10-minute model-run timeout, allowing longer agent tasks to complete without being stopped by the shorter runtime default.
 - Codex settings are written only during plugin installation or update, not every time the dashboard opens.
 - Embedded rounded NeonX header logo and Windows executable icon.
 
