@@ -393,10 +393,6 @@ namespace NeonX.OpenClawInstaller
                 "Confirm OpenClaw upgrade", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
             if (answer != DialogResult.Yes) return;
 
-            LaunchOpenClawUpgradeTerminal();
-            Close();
-            return;
-
             busy = true;
             SetEnabled(false);
             install.Text = "Updating...";
@@ -473,41 +469,6 @@ namespace NeonX.OpenClawInstaller
             }
 
             await RefreshAgentsAsync();
-        }
-
-        private void LaunchOpenClawUpgradeTerminal()
-        {
-            string directory = Path.Combine(Path.GetTempPath(), "NeonX", "OpenClaw-" + Version);
-            Directory.CreateDirectory(directory);
-            string scriptPath = Path.Combine(directory, "upgrade-openclaw.ps1");
-            string logPath = Path.Combine(directory, "NeonX-OpenClaw-update.log");
-            string script = @"
-$ErrorActionPreference = 'Stop'
-Write-Host 'NeonX Agent Hub - OpenClaw upgrade' -ForegroundColor Cyan
-Write-Host 'The application has been closed. Keep this window open until the upgrade finishes.'
-try {
-  $required = '" + Version + @"'
-  node --version
-  npm --version
-  npm install -g openclaw@" + Version + @"
-  openclaw plugins install @openclaw/codex@" + CodexPluginVersion + @" --pin --accept-capabilities --acknowledge-install-policy-warning
-  openclaw --version
-  openclaw plugins inspect codex --json | Out-Null
-  Write-Host ('OpenClaw upgrade completed successfully: ' + $required) -ForegroundColor Green
-} catch {
-  Write-Host ('Upgrade failed: ' + $_.Exception.Message) -ForegroundColor Red
-  exit 1
-}
-Read-Host 'Press Enter to close this terminal'
-";
-            File.WriteAllText(scriptPath, script, Encoding.UTF8);
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = "powershell.exe",
-                Arguments = "-NoProfile -ExecutionPolicy Bypass -File " + Quote(scriptPath),
-                UseShellExecute = true,
-                WorkingDirectory = directory
-            });
         }
 
         private async Task InstallNodeAsync()
@@ -712,7 +673,6 @@ Read-Host 'Press Enter to close this terminal'
             SetStatus("Open 1/5 - Checking installed components");
             Write("[OPEN 1/5] OpenClaw and the Codex plugin are installed.");
             Write("  - Codex configuration is preserved; no plugin settings are rewritten during Open.");
-            await EnsureNeonxResponsesProviderAsync();
             await EnsureDefaultNeonxModelsAsync();
 
             progress.Value = 25;
@@ -866,15 +826,6 @@ Read-Host 'Press Enter to close this terminal'
             else Write("  - Could not disable implicit OpenAI memory embeddings: " + StripPowerShellClixml(memory.Error));
         }
 
-        private async Task EnsureNeonxResponsesProviderAsync()
-        {
-            CommandResult result = await RunOpenClawCaptureAsync("config set models.providers.neonx.api openai-responses");
-            if (result.ExitCode != 0)
-                Write("  - Could not migrate neonx provider to openai-responses: " + StripPowerShellClixml(result.Error));
-            else
-                Write("  - Neonx provider set to openai-responses.");
-        }
-
         private async Task AddModelAsync()
         {
             using (Form dialog = new Form())
@@ -935,7 +886,7 @@ Read-Host 'Press Enter to close this terminal'
             Write("  - Codex setting applied: plugin enabled.");
 
             Write("  - Applying default provider: neonx...");
-            string neonxProviderJson = "{\"api\":\"openai-responses\",\"baseUrl\":\"https://api.neonx.ai/v1\",\"auth\":\"api-key\",\"authHeader\":true,\"headers\":{\"User-Agent\":\"neonx-agent/1.0\"},\"models\":[{\"id\":\"gpt-5.6-terra\",\"name\":\"gpt-5.6-terra\"},{\"id\":\"gpt-5.6-sol\",\"name\":\"gpt-5.6-sol\"},{\"id\":\"gpt-5.6-luna\",\"name\":\"gpt-5.6-luna\"},{\"id\":\"deepseek-v4-flash\",\"name\":\"deepseek-v4-flash\"}]}";
+            string neonxProviderJson = "{\"api\":\"chat-completions\",\"baseUrl\":\"https://api.neonx.ai/v1\",\"auth\":\"api-key\",\"authHeader\":true,\"headers\":{\"User-Agent\":\"neonx-agent/1.0\"},\"models\":[{\"id\":\"gpt-5.6-terra\",\"name\":\"gpt-5.6-terra\"},{\"id\":\"gpt-5.6-sol\",\"name\":\"gpt-5.6-sol\"},{\"id\":\"gpt-5.6-luna\",\"name\":\"gpt-5.6-luna\"},{\"id\":\"deepseek-v4-flash\",\"name\":\"deepseek-v4-flash\"}]}";
             string neonxProviderCommand = "config set models.providers.neonx \"" + neonxProviderJson.Replace("\"", "\\\"") + "\" --strict-json";
             CommandResult provider = await RunOpenClawCaptureAsync(neonxProviderCommand);
             if (provider.ExitCode != 0)
