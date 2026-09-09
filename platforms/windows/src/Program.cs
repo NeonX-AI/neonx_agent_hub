@@ -238,7 +238,7 @@ namespace NeonX.OpenClawInstaller
                     throw new InvalidOperationException("System Node.js was not found. Return to the agent card and use Install Node.");
                 string nodeVersion = LastNonEmptyLine(node.Output);
                 if (!IsSupportedNodeVersion(nodeVersion))
-                    throw new InvalidOperationException("Node.js " + nodeVersion + " is not supported by OpenClaw " + Version + ". Required: Node 22.22.3-22.x, 24.15.0-24.x, or 25.9.0+.");
+                    throw new InvalidOperationException("Node.js " + nodeVersion + " is not supported by OpenClaw " + Version + ". Required: Node 24.16.0+ or Node 26.1.0+ (recommended).");
                 CommandResult npm = await RunCaptureAsync(RefreshPath() + "; npm --version");
                 if (npm.ExitCode != 0)
                     throw new InvalidOperationException("npm was not found in the system PATH. Install Node.js with npm, then click Refresh.");
@@ -416,7 +416,7 @@ namespace NeonX.OpenClawInstaller
                     throw new InvalidOperationException("System Node.js was not found. Return to the agent card and use Install Node.");
                 string nodeVersion = LastNonEmptyLine(node.Output);
                 if (!IsSupportedNodeVersion(nodeVersion))
-                    throw new InvalidOperationException("Node.js " + nodeVersion + " is not supported by OpenClaw " + Version + ". Required: Node 22.22.3-22.x, 24.15.0-24.x, or 25.9.0+.");
+                    throw new InvalidOperationException("Node.js " + nodeVersion + " is not supported by OpenClaw " + Version + ". Required: Node 24.16.0+ or Node 26.1.0+ (recommended).");
                 CommandResult npm = await RunCaptureAsync(RefreshPath() + "; npm --version");
                 if (npm.ExitCode != 0)
                     throw new InvalidOperationException("npm was not found in the system PATH. Install Node.js with npm.");
@@ -476,7 +476,7 @@ namespace NeonX.OpenClawInstaller
             string reason = nodeDetected
                 ? "The installed Node.js " + detectedNodeVersion + " is not compatible with OpenClaw " + Version + "."
                 : "Node.js was not found in the system PATH.";
-            string explanation = reason + "\r\n\r\nOpenClaw requires Node 22.22.3+, Node 24.15+, or Node 25.9+. Node 26 is recommended for the WAL-reset-safe linked SQLite runtime.\r\n\r\nNeonX will download Node.js " + RecommendedNodeVersion + " from nodejs.org and install it system-wide with Administrator permission. Continue?";
+            string explanation = reason + "\r\n\r\nOpenClaw requires Node 24.16.0+ or Node 26.1.0+. Node 26 is recommended.\r\n\r\nNeonX will download Node.js " + RecommendedNodeVersion + " from nodejs.org and install it system-wide with Administrator permission. Continue?";
             if (MessageBox.Show(explanation, "Install Node.js 26", MessageBoxButtons.YesNo, MessageBoxIcon.Information) != DialogResult.Yes) return;
 
             string architecture = GetNodeInstallerArchitecture();
@@ -594,7 +594,7 @@ namespace NeonX.OpenClawInstaller
             }
             else if (node.ExitCode == 0)
             {
-                nodeStatus.Text = "Node.js: " + nodeVersion + " - requires Node 22.22.3-22.x, 24.15.0-24.x, or 25.9.0+";
+                nodeStatus.Text = "Node.js: " + nodeVersion + " - requires Node 24.16.0+ or Node 26.1.0+ (recommended)";
                 nodeStatus.ForeColor = Color.FromArgb(248, 113, 113);
             }
             else
@@ -1193,10 +1193,9 @@ namespace NeonX.OpenClawInstaller
             try
             {
                 Version version = new Version((value ?? "").Trim().TrimStart('v'));
-                if (version.Major == 22) return version.CompareTo(new Version(22, 22, 3)) >= 0;
-                if (version.Major == 24) return version.CompareTo(new Version(24, 15, 0)) >= 0;
-                if (version.Major == 25) return version.CompareTo(new Version(25, 9, 0)) >= 0;
-                return version.Major > 25;
+                if (version.Major == 24) return version.CompareTo(new Version(24, 16, 0)) >= 0;
+                if (version.Major == 26) return version.CompareTo(new Version(26, 1, 0)) >= 0;
+                return false;
             }
             catch { return false; }
         }
