@@ -35,6 +35,15 @@ namespace NeonX.OpenClawInstaller
         }
     }
 
+    internal sealed class BufferedOverlay : Panel
+    {
+        public BufferedOverlay()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
+            UpdateStyles();
+        }
+    }
+
     internal sealed class InstallerForm : Form
     {
         private const string Version = ComponentVersions.OpenClaw;
@@ -58,6 +67,10 @@ namespace NeonX.OpenClawInstaller
         private readonly Label nodeStatus = new Label();
         private readonly Label openClawStatus = new Label();
         private readonly Label codexStatus = new Label();
+        private readonly BufferedOverlay closingOverlay = new BufferedOverlay();
+        private readonly Timer closingTimer = new Timer();
+        private readonly Font closingFont = new Font("Segoe UI Semibold", 11F);
+        private int closingAngle;
         private bool busy;
         private bool nodeDetected;
         private bool nodeReady;
@@ -177,6 +190,28 @@ namespace NeonX.OpenClawInstaller
             progress.Location = new Point(32, 348);
             progress.Size = new Size(756, 12);
             Controls.Add(progress);
+
+            closingOverlay.Dock = DockStyle.Fill;
+            closingOverlay.BackColor = Color.FromArgb(245, 2, 6, 23);
+            closingOverlay.Visible = false;
+            closingOverlay.Paint += delegate(object sender, PaintEventArgs e)
+            {
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                using (Pen track = new Pen(Color.FromArgb(71, 85, 105), 6))
+                using (Pen arc = new Pen(Color.FromArgb(34, 211, 238), 6))
+                {
+                    Rectangle ring = new Rectangle((closingOverlay.Width - 44) / 2, (closingOverlay.Height - 44) / 2 - 24, 44, 44);
+                    e.Graphics.DrawEllipse(track, ring);
+                    e.Graphics.DrawArc(arc, ring, closingAngle, 105);
+                }
+                using (Brush brush = new SolidBrush(Color.White))
+                using (StringFormat format = new StringFormat { Alignment = StringAlignment.Center })
+                    e.Graphics.DrawString("Stopping OpenClaw...", closingFont, brush, new RectangleF(0, closingOverlay.Height / 2 + 12, closingOverlay.Width, 30), format);
+            };
+            closingTimer.Interval = 40;
+            closingTimer.Tick += delegate { closingAngle = (closingAngle + 12) % 360; closingOverlay.Invalidate(); };
+            Controls.Add(closingOverlay);
+            closingOverlay.BringToFront();
 
             log.Location = new Point(32, 376);
             log.Size = new Size(756, 180);
@@ -705,7 +740,9 @@ namespace NeonX.OpenClawInstaller
             SetStatus("Open 4/5 - Restarting the OpenClaw gateway");
             Write("[OPEN 4/5] Stopping any existing gateway, then starting fresh so new settings apply...");
             await StopOpenClawGatewayAsync();
-            await Task.Delay(1500);
+            // OpenClaw may need several seconds to release the old listener and
+            // open its database/plugins before the new process can bind.
+            await Task.Delay(3000);
             string gatewayError;
             if (!StartOpenClawGateway(gatewayPort, out gatewayError))
             {
@@ -723,7 +760,7 @@ namespace NeonX.OpenClawInstaller
             {
                 Write("[RETRY] The gateway was not ready on the first attempt. Restarting it once...");
                 await StopOpenClawGatewayAsync();
-                await Task.Delay(1000);
+                await Task.Delay(3000);
                 if (StartOpenClawGateway(gatewayPort, out gatewayError))
                     gatewayReady = await WaitForGatewayAsync(gatewayPort);
                 if (!gatewayReady)
@@ -859,11 +896,13 @@ namespace NeonX.OpenClawInstaller
         {
             string[] configCommands =
             {
+                "config set plugins.allow \"[\\\"codex\\\"]\" --strict-json",
+                "config set plugins.entries.codex.enabled true",
                 "config set plugins.entries.codex.config.sessionCatalog.enabled true",
                 "config set plugins.entries.codex.config.supervision.enabled true",
                 "config set agents.defaults.timeoutSeconds " + ModelTimeoutSeconds
             };
-            string[] configDescriptions = { "session catalog enabled", "supervision enabled", "model timeout set to 10 minutes" };
+            string[] configDescriptions = { "Codex plugin allowed", "Codex plugin enabled", "session catalog enabled", "supervision enabled", "model timeout set to 10 minutes" };
             for (int index = 0; index < configCommands.Length; index++)
             {
                 Write("  - Applying Codex setting: " + configDescriptions[index] + "...");
@@ -1099,7 +1138,9 @@ namespace NeonX.OpenClawInstaller
         private async Task<bool> WaitForGatewayAsync(int port)
         {
             string url = "http://127.0.0.1:" + port + "/";
-            for (int attempt = 0; attempt < 30; attempt++)
+            // Startup can legitimately take 30+ seconds (database and plugins).
+            // Keep polling for up to one minute before declaring a failure.
+            for (int attempt = 0; attempt < 120; attempt++)
             {
                 if (gatewayProcess == null || gatewayProcess.HasExited) return false;
                 if (attempt % 4 == 0)
@@ -1479,9 +1520,10 @@ namespace NeonX.OpenClawInstaller
             Color color = Color.FromArgb(226, 232, 240);
             string normalized = (text ?? "").ToUpperInvariant();
             if (normalized.Contains("[ERROR]") || normalized.Contains("[GATEWAY ERROR]") || normalized.Contains("FAILED")) color = Color.FromArgb(248, 113, 113);
-            else if (normalized.Contains("[OK]") || normalized.Contains("[COMPLETE]") || normalized.Contains("[READY]") || normalized.Contains("STARTUP COMPLETE") || normalized.Contains("RECOVERY STARTUP COMPLETE")) color = Color.FromArgb(74, 222, 128);
+            else if (normalized.Contains("[OK]") || normalized.Contains("[COMPLETE]") || normalized.Contains("[READY]") || normalized.Contains("STARTUP COMPLETE") || normalized.Contains("RECOVERY STARTUP COMPLETE") || normalized.Contains("GATEWAY] READY") || normalized.Contains("HTTP SERVER LISTENING")) color = Color.FromArgb(74, 222, 128);
             else if (normalized.Contains("[RETRY]") || normalized.Contains("WARNING")) color = Color.FromArgb(251, 191, 36);
             else if (normalized.Contains("[OPEN ") || normalized.Contains("STEP ")) color = Color.FromArgb(103, 232, 249);
+            else if (normalized.Contains("[GATEWAY]")) color = Color.FromArgb(186, 230, 253);
             log.SelectionStart = log.TextLength;
             log.SelectionLength = 0;
             log.SelectionColor = color;
@@ -1509,15 +1551,28 @@ namespace NeonX.OpenClawInstaller
             }
         }
 
-        private void OnFormClosing(object sender, FormClosingEventArgs e)
+        private async void OnFormClosing(object sender, FormClosingEventArgs e)
         {
+            if (closingOverlay.Visible) { e.Cancel = true; return; }
             if (busy)
             {
                 e.Cancel = true;
                 MessageBox.Show("NeonX components are being installed. Please wait for the process to complete.", "NeonX Agent Hub", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
-            StopOpenClawBeforeExit();
+            // Keep the window responsive and show clear feedback while the
+            // gateway is being shut down. Closing is resumed after cleanup.
+            e.Cancel = true;
+            closingOverlay.Visible = true;
+            closingOverlay.BringToFront();
+            closingTimer.Start();
+            status.Text = "Stopping OpenClaw gateway...";
+            SetEnabled(false);
+            await Task.Run(delegate { StopOpenClawBeforeExit(); });
+            closingTimer.Stop();
+            closingOverlay.Visible = false;
+            FormClosing -= OnFormClosing;
+            Close();
         }
     }
 
