@@ -707,8 +707,8 @@ namespace NeonX.OpenClawInstaller
             log.Clear();
             SetStatus("Open 1/5 - Checking installed components");
             Write("[OPEN 1/5] OpenClaw and the Codex plugin are installed.");
-            Write("  - Codex configuration is preserved; no plugin settings are rewritten during Open.");
-            await EnsureDefaultNeonxModelsAsync();
+            Write("  - Checking native Codex user-home access and supervision write controls...");
+            await EnsureCodexSupervisionAsync();
 
             progress.Value = 25;
             SetStatus("Open 2/5 - Checking local gateway configuration");
@@ -898,11 +898,13 @@ namespace NeonX.OpenClawInstaller
             {
                 "config set plugins.allow \"[\\\"codex\\\"]\" --strict-json",
                 "config set plugins.entries.codex.enabled true",
+                "config set plugins.entries.codex.config.appServer.homeScope user",
                 "config set plugins.entries.codex.config.sessionCatalog.enabled true",
                 "config set plugins.entries.codex.config.supervision.enabled true",
+                "config set plugins.entries.codex.config.supervision.allowWriteControls true",
                 "config set agents.defaults.timeoutSeconds " + ModelTimeoutSeconds
             };
-            string[] configDescriptions = { "Codex plugin allowed", "Codex plugin enabled", "session catalog enabled", "supervision enabled", "model timeout set to 10 minutes" };
+            string[] configDescriptions = { "Codex plugin allowed", "Codex plugin enabled", "native Codex user home enabled", "session catalog enabled", "supervision enabled", "supervision write controls enabled", "model timeout set to 10 minutes" };
             for (int index = 0; index < configCommands.Length; index++)
             {
                 Write("  - Applying Codex setting: " + configDescriptions[index] + "...");
@@ -924,34 +926,6 @@ namespace NeonX.OpenClawInstaller
             }
             Write("  - Codex setting applied: plugin enabled.");
 
-            Write("  - Applying default provider: neonx...");
-            string neonxProviderJson = "{\"api\":\"chat-completions\",\"baseUrl\":\"https://api.neonx.ai/v1\",\"auth\":\"api-key\",\"authHeader\":true,\"headers\":{\"User-Agent\":\"neonx-agent/1.0\"},\"models\":[{\"id\":\"gpt-5.6-terra\",\"name\":\"gpt-5.6-terra\"},{\"id\":\"gpt-5.6-sol\",\"name\":\"gpt-5.6-sol\"},{\"id\":\"gpt-5.6-luna\",\"name\":\"gpt-5.6-luna\"},{\"id\":\"deepseek-v4-flash\",\"name\":\"deepseek-v4-flash\"}]}";
-            string neonxProviderCommand = "config set models.providers.neonx \"" + neonxProviderJson.Replace("\"", "\\\"") + "\" --strict-json";
-            CommandResult provider = await RunOpenClawCaptureAsync(neonxProviderCommand);
-            if (provider.ExitCode != 0)
-            {
-                string providerDetails = string.IsNullOrWhiteSpace(provider.Error) ? provider.Error : provider.Output;
-                providerDetails = StripPowerShellClixml(providerDetails);
-                Write("  - The default neonx provider is already configured or was rejected: " + providerDetails);
-            }
-            else
-            {
-                Write("  - Default provider neonx registered with model gpt-5.6-terra.");
-            }
-
-            Write("  - Applying default model: neonx/gpt-5.6-terra...");
-            string defaultModelCommand = "config set agents.defaults.model.primary \"neonx/gpt-5.6-terra\" --expect-current-absent";
-            CommandResult defaultModel = await RunOpenClawCaptureAsync(defaultModelCommand);
-            if (defaultModel.ExitCode != 0)
-            {
-                string modelDetails = string.IsNullOrWhiteSpace(defaultModel.Error) ? defaultModel.Error : defaultModel.Output;
-                modelDetails = StripPowerShellClixml(modelDetails);
-                Write("  - The default model is already set or was rejected: " + modelDetails);
-            }
-            else
-            {
-                Write("  - Default model neonx/gpt-5.6-terra selected.");
-            }
             Write("  - Disabling implicit OpenAI memory embeddings (using local FTS-only memory)...");
             CommandResult memory = await RunOpenClawCaptureAsync("config set memory.search.provider none");
             if (memory.ExitCode != 0)
@@ -963,7 +937,38 @@ namespace NeonX.OpenClawInstaller
             {
                 Write("  - Memory provider set to none; no OpenAI API key is required.");
             }
-            Write("Codex plugin, session catalog, supervision, and the neonx provider are configured.");
+            Write("Codex plugin now uses the signed-in user's native Codex account and default model.");
+        }
+
+        private async Task EnsureCodexSupervisionAsync()
+        {
+            string[] commands =
+            {
+                "config set plugins.allow \"[\\\"codex\\\"]\" --strict-json",
+                "config set plugins.entries.codex.enabled true",
+                "config set plugins.entries.codex.config.appServer.homeScope user",
+                "config set plugins.entries.codex.config.supervision.enabled true",
+                "config set plugins.entries.codex.config.supervision.allowWriteControls true"
+            };
+            foreach (string command in commands)
+            {
+                CommandResult result = await RunOpenClawCaptureAsync(command);
+                if (result.ExitCode != 0)
+                {
+                    string details = string.IsNullOrWhiteSpace(result.Error) ? result.Output : result.Error;
+                    throw new InvalidOperationException("Could not apply Codex supervision settings: " + StripPowerShellClixml(details));
+                }
+            }
+            CommandResult currentModel = await RunOpenClawCaptureAsync("config get agents.defaults.model.primary");
+            string primary = (currentModel.Output ?? "").Trim().Trim('"');
+            if (currentModel.ExitCode == 0 && primary.Equals("neonx/gpt-5.6-terra", StringComparison.OrdinalIgnoreCase))
+            {
+                CommandResult unsetModel = await RunOpenClawCaptureAsync("config unset agents.defaults.model.primary");
+                if (unsetModel.ExitCode != 0)
+                    throw new InvalidOperationException("Could not remove the old NeonX default model: " + StripPowerShellClixml(unsetModel.Error));
+                Write("  - Removed the old NeonX model override; Codex will select its native default model.");
+            }
+            Write("  - Native Codex user home and supervision write controls are enabled.");
         }
 
         private async Task<CommandResult> RunCaptureAsync(string command)
