@@ -738,10 +738,14 @@ namespace NeonX.OpenClawInstaller
 
         private async Task EnsureDefaultNeonxModelsAsync()
         {
-            string models = "[{\"id\":\"gpt-5.6-terra\",\"name\":\"gpt-5.6-terra\"},{\"id\":\"gpt-5.6-sol\",\"name\":\"gpt-5.6-sol\"},{\"id\":\"gpt-5.6-luna\",\"name\":\"gpt-5.6-luna\"},{\"id\":\"deepseek-v4-flash\",\"name\":\"deepseek-v4-flash\"}]";
-            CommandResult result = await RunOpenClawCaptureAsync("config set models.providers.neonx.models \"" + models.Replace("\"", "\\\"") + "\" --strict-json");
-            if (result.ExitCode == 0) Write("  - Default neonx models synchronized.");
-            else Write("  - Could not synchronize default neonx models: " + StripPowerShellClixml(result.Error));
+            string provider = "{\"api\":\"openai-responses\",\"baseUrl\":\"https://api.neonx.ai/v1\",\"auth\":\"api-key\",\"authHeader\":true,\"headers\":{\"User-Agent\":\"neonx-agent/1.0\"},\"models\":[{\"id\":\"gpt-5.6-terra\",\"name\":\"gpt-5.6-terra\"},{\"id\":\"gpt-5.6-sol\",\"name\":\"gpt-5.6-sol\"},{\"id\":\"gpt-5.6-luna\",\"name\":\"gpt-5.6-luna\"},{\"id\":\"deepseek-v4-flash\",\"name\":\"deepseek-v4-flash\"}]}";
+            CommandResult result = await RunOpenClawCaptureAsync("config set models.providers.neonx \"" + provider.Replace("\"", "\\\"") + "\" --strict-json --merge");
+            if (result.ExitCode == 0) Write("  - NeonX provider and default models synchronized.");
+            else
+            {
+                string details = string.IsNullOrWhiteSpace(result.Error) ? result.Output : result.Error;
+                Write("  - Could not synchronize the NeonX provider and default models: " + StripPowerShellClixml(details));
+            }
 
             CommandResult memory = await RunOpenClawCaptureAsync("config set memory.search.provider none");
             if (memory.ExitCode == 0) Write("  - Memory uses local FTS search; implicit OpenAI embeddings disabled.");
