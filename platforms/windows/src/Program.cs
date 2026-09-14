@@ -591,8 +591,9 @@ namespace NeonX.OpenClawInstaller
             progress.Style = ProgressBarStyle.Blocks;
             progress.Value = 5;
             log.Clear();
-            SetStatus("Open 1/5 - Checking installed components");
-            Write("[OPEN 1/5] OpenClaw is installed.");
+            SetStatus("Open 1/5 - Synchronizing NeonX models");
+            Write("[OPEN 1/5] OpenClaw is installed. Synchronizing the default NeonX models...");
+            await EnsureDefaultNeonxModelsAsync();
 
             progress.Value = 25;
             SetStatus("Open 2/5 - Checking local gateway configuration");
