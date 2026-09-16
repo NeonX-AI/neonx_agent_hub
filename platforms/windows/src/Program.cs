@@ -585,6 +585,26 @@ namespace NeonX.OpenClawInstaller
                 return;
             }
 
+            if (gatewayProcess != null && !gatewayProcess.HasExited && !string.IsNullOrWhiteSpace(gatewayToken))
+            {
+                string runningUrl = "http://127.0.0.1:" + gatewayPort + "/#token=" + Uri.EscapeDataString(gatewayToken);
+                if (OpenUrl(runningUrl))
+                {
+                    progress.Style = ProgressBarStyle.Blocks;
+                    progress.Value = 100;
+                    SetStatus("OpenClaw Control UI opened in the browser");
+                    Write("[READY] The running OpenClaw Control UI was opened again without restarting the gateway.");
+                    stop.Visible = true;
+                    stop.Enabled = true;
+                }
+                else
+                {
+                    Write("[ERROR] Windows could not launch the default browser.");
+                    MessageBox.Show("Windows could not launch the default browser.", "Open failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+                return;
+            }
+
             install.Enabled = false;
             install.Text = "Opening...";
             stop.Visible = false;
