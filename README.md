@@ -20,6 +20,7 @@ The NeonX UI and multi-resolution Windows executable icon preserve the transpare
 assets/
   images/logo/            Shared NeonX branding
 config/
+  default-models.json      Default NeonX models synchronized to OpenClaw
   versions.env            Pinned component versions and installer checksums
 platforms/
   windows/                Windows source, manifest, icon generation, and build
@@ -50,6 +51,8 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 ```
 
 Output: `dist\windows\NeonX-Agent-Hub.exe`.
+
+`config/default-models.json` is the readable source of truth for the bundled model list. It is embedded into the executable during the build and is not distributed as a separate runtime file. Edit it before building to add, change, or remove default NeonX models. Whenever the Hub opens OpenClaw, it synchronizes the complete embedded list to `models.providers.neonx.models` in the OpenClaw configuration. Each model can declare `"input": ["text", "image"]` to enable image attachments.
 
 Visual Studio and the .NET SDK are not required. The build uses the .NET Framework C# compiler included with Windows.
 

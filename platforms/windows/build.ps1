@@ -11,6 +11,7 @@ $repoRoot = (Resolve-Path (Join-Path $platformRoot "..\..")).Path
 $source = Join-Path $platformRoot "src\Program.cs"
 $manifest = Join-Path $platformRoot "src\app.manifest"
 $versionsFile = Join-Path $repoRoot "config\versions.env"
+$defaultModels = Join-Path $repoRoot "config\default-models.json"
 $logo = Join-Path $repoRoot "assets\images\logo\logo-light.png"
 $openClawLogo = Join-Path $repoRoot "assets\images\logo\openclaw.png"
 $obj = Join-Path $platformRoot "obj"
@@ -147,6 +148,7 @@ if (-not (Test-Path -LiteralPath $compiler)) {
 if (-not (Test-Path -LiteralPath $compiler)) { throw "The .NET Framework 4.x C# compiler was not found." }
 if (-not (Test-Path -LiteralPath $logo)) { throw "Logo not found: $logo" }
 if (-not (Test-Path -LiteralPath $openClawLogo)) { throw "OpenClaw logo not found: $openClawLogo" }
+if (-not (Test-Path -LiteralPath $defaultModels)) { throw "Default models configuration not found: $defaultModels" }
 
 New-Item -ItemType Directory -Force -Path $obj, $dist | Out-Null
 $versions = Import-VersionEnvironment -Path $versionsFile
@@ -166,8 +168,10 @@ $compilerArguments = @(
     "/reference:System.Core.dll",
     "/reference:System.Drawing.dll",
     "/reference:System.Windows.Forms.dll",
+    "/reference:System.Web.Extensions.dll",
     ("/resource:{0},NeonXLogo" -f $logo),
     ("/resource:{0},OpenClawLogo" -f $openClawLogo),
+    ("/resource:{0},DefaultNeonxModels" -f $defaultModels),
     ("/out:{0}" -f $output),
     $source,
     $generatedVersions

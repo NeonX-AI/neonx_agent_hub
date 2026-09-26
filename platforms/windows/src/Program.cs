@@ -1,5 +1,6 @@
 ﻿using System;
 using System.ComponentModel;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -8,6 +9,7 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
+using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
 [assembly: System.Reflection.AssemblyTitle("NeonX Agent Hub")]
@@ -50,6 +52,7 @@ namespace NeonX.OpenClawInstaller
         private const string RecommendedNodeVersion = ComponentVersions.NodeJsDistribution;
         private const string NodeX64Sha256 = ComponentVersions.NodeX64Sha256;
         private const string NodeArm64Sha256 = ComponentVersions.NodeArm64Sha256;
+        private const string DefaultModelsFileName = "default-models.json";
         private readonly Label status = new Label();
         private readonly ProgressBar progress = new ProgressBar();
         private readonly RichTextBox log = new RichTextBox();
@@ -758,8 +761,19 @@ namespace NeonX.OpenClawInstaller
 
         private async Task EnsureDefaultNeonxModelsAsync()
         {
-            string provider = "{\"api\":\"openai-responses\",\"baseUrl\":\"https://api.neonx.ai/v1\",\"auth\":\"api-key\",\"authHeader\":true,\"headers\":{\"User-Agent\":\"neonx-agent/1.0\"},\"models\":[{\"id\":\"gpt-5.6-terra\",\"name\":\"gpt-5.6-terra\"},{\"id\":\"gpt-5.6-sol\",\"name\":\"gpt-5.6-sol\"},{\"id\":\"gpt-5.6-luna\",\"name\":\"gpt-5.6-luna\"},{\"id\":\"deepseek-v4-flash\",\"name\":\"deepseek-v4-flash\"}]}";
+            string models;
+            try { models = LoadDefaultModelsJson(); }
+            catch (Exception ex)
+            {
+                Write("  - Could not load " + DefaultModelsFileName + ": " + ex.Message);
+                return;
+            }
+            string provider = "{\"api\":\"openai-responses\",\"baseUrl\":\"https://api.neonx.ai/v1\",\"auth\":\"api-key\",\"authHeader\":true,\"headers\":{\"User-Agent\":\"neonx-agent/1.0\"}}";
             CommandResult result = await RunOpenClawCaptureAsync("config set models.providers.neonx \"" + provider.Replace("\"", "\\\"") + "\" --strict-json --merge");
+            if (result.ExitCode == 0)
+            {
+                result = await RunOpenClawCaptureAsync("config set models.providers.neonx.models \"" + models.Replace("\"", "\\\"") + "\" --strict-json");
+            }
             if (result.ExitCode == 0) Write("  - NeonX provider and default models synchronized.");
             else
             {
@@ -789,16 +803,39 @@ namespace NeonX.OpenClawInstaller
                 dialog.Controls.Add(title); dialog.Controls.Add(model); dialog.Controls.Add(save); dialog.Controls.Add(cancel);
                 if (dialog.ShowDialog(this) != DialogResult.OK || string.IsNullOrWhiteSpace(model.Text)) return;
                 string modelId = model.Text.Trim();
-                string modelJson = "[{\"id\":\"gpt-5.6-terra\",\"name\":\"gpt-5.6-terra\"},{\"id\":\"gpt-5.6-sol\",\"name\":\"gpt-5.6-sol\"},{\"id\":\"gpt-5.6-luna\",\"name\":\"gpt-5.6-luna\"},{\"id\":\"deepseek-v4-flash\",\"name\":\"deepseek-v4-flash\"},{\"id\":\"" + JsonEscape(modelId) + "\",\"name\":\"" + JsonEscape(modelId) + "\"}]";
+                string modelJson;
+                try
+                {
+                    JavaScriptSerializer serializer = new JavaScriptSerializer();
+                    object[] configuredModels = serializer.Deserialize<object[]>(LoadDefaultModelsJson());
+                    List<object> models = new List<object>(configuredModels);
+                    models.Add(new Dictionary<string, object> { { "id", modelId }, { "name", modelId }, { "input", new[] { "text", "image" } } });
+                    modelJson = serializer.Serialize(models);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(ex.Message, "Could not load models", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
                 CommandResult result = await RunOpenClawCaptureAsync("config set models.providers.neonx.models \"" + modelJson.Replace("\"", "\\\"") + "\" --strict-json");
                 if (result.ExitCode != 0) { MessageBox.Show(StripPowerShellClixml(result.Error), "Could not add model", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
                 MessageBox.Show("Model added successfully: neonx/" + modelId, "Model added", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
         }
 
-        private static string JsonEscape(string value)
+        private static string LoadDefaultModelsJson()
         {
-            return value.Replace("\\", "\\\\").Replace("\"", "\\\"");
+            string json;
+            using (Stream stream = typeof(InstallerForm).Assembly.GetManifestResourceStream("DefaultNeonxModels"))
+            {
+                if (stream == null) throw new FileNotFoundException("The embedded default models configuration was not found.");
+                using (StreamReader reader = new StreamReader(stream, Encoding.UTF8)) json = reader.ReadToEnd();
+            }
+
+            JavaScriptSerializer serializer = new JavaScriptSerializer();
+            object[] models = serializer.Deserialize<object[]>(json);
+            if (models == null) throw new InvalidDataException(DefaultModelsFileName + " must contain a JSON array.");
+            return serializer.Serialize(models);
         }
 
         private async Task<CommandResult> RunCaptureAsync(string command)

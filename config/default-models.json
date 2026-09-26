@@ -1,0 +1,22 @@
+[
+  {
+    "id": "gpt-5.6-terra",
+    "name": "gpt-5.6-terra",
+    "input": ["text", "image"]
+  },
+  {
+    "id": "gpt-5.6-sol",
+    "name": "gpt-5.6-sol",
+    "input": ["text", "image"]
+  },
+  {
+    "id": "gpt-5.6-luna",
+    "name": "gpt-5.6-luna",
+    "input": ["text", "image"]
+  },
+  {
+    "id": "deepseek-v4-flash",
+    "name": "deepseek-v4-flash",
+    "input": ["text"]
+  }
+]
