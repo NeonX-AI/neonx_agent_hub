@@ -5,8 +5,7 @@ NeonX Agent Hub is a desktop catalog for installing and opening local AI agents.
 The Windows release currently includes OpenClaw `2026.9.4`. On startup it checks whether the required components are available and displays the appropriate action:
 
 - **Install** when OpenClaw is not installed.
-- **Onboard** when OpenClaw is installed but has not been configured yet; this opens the interactive setup wizard in a visible terminal, then launches the dashboard automatically.
-- **Open** when OpenClaw is configured; this starts the local gateway with a freshly generated secure token and launches the authenticated Control UI in the default browser.
+- **Open** when OpenClaw is installed; NeonX creates the required local configuration automatically, starts the gateway with a freshly generated secure token, and launches the authenticated Control UI in the default browser.
 - **Update** is shown as a separate optional action when a newer OpenClaw version is available; opening OpenClaw never prompts for or starts an update automatically.
 - Before updating, NeonX warns that configuration changes may require review or reconfiguration and asks the user to confirm.
 - **Stop** terminates the OpenClaw gateway started by NeonX and requests any managed OpenClaw gateway service to stop.
@@ -34,7 +33,7 @@ build.ps1                 Platform-aware root build entry point
 
 - NeonX agent catalog interface.
 - Automatic OpenClaw installation detection.
-- Install/Onboard/Open button based on system state.
+- Install/Open button based on system state; no interactive OpenClaw onboarding is required.
 - OpenClaw Control UI launch through a NeonX-managed local gateway with token authentication.
 - Automatic OpenClaw shutdown when the NeonX Hub closes, preventing an unnoticed background gateway from continuing to run.
 - System Node.js compatibility detection through `node --version`; NeonX never downloads a local Node.js runtime.

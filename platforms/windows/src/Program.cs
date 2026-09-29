@@ -75,7 +75,6 @@ namespace NeonX.OpenClawInstaller
         private bool nodeReady;
         private string detectedNodeVersion = "";
         private bool openClawInstalled;
-        private bool openClawConfigured;
         private bool openClawUpdateAvailable;
         private string detectedOpenClawVersion = "";
         private Process gatewayProcess;
@@ -286,16 +285,13 @@ namespace NeonX.OpenClawInstaller
                 progress.Style = ProgressBarStyle.Blocks;
                 progress.Value = 100;
                 openClawInstalled = true;
-                openClawConfigured = IsOpenClawConfigured();
-                openClawStatus.Text = openClawConfigured
-                    ? "OpenClaw: installed - version " + Version
-                    : "OpenClaw: installed - onboarding required";
+                openClawStatus.Text = "OpenClaw: installed - version " + Version;
                 openClawStatus.ForeColor = Color.FromArgb(74, 222, 128);
-                install.Text = openClawConfigured ? "Open" : "Onboard";
+                install.Text = "Open";
                 SetStatus("OpenClaw installed successfully");
                 Write("[COMPLETE] OpenClaw is ready.");
                 MessageBox.Show("OpenClaw " + Version + " was installed successfully.", "NeonX Agent Hub", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                LaunchOnboarding();
+                await OpenDashboardAsync();
             }
             catch (Exception error)
             {
@@ -322,11 +318,6 @@ namespace NeonX.OpenClawInstaller
         {
             if (openClawInstalled)
             {
-                if (!openClawConfigured)
-                {
-                    LaunchOnboarding();
-                    return;
-                }
                 await OpenDashboardAsync();
                 return;
             }
@@ -547,21 +538,17 @@ namespace NeonX.OpenClawInstaller
                 string installedVersion = LastNonEmptyLine(result.Output);
                 detectedOpenClawVersion = installedVersion;
                 openClawUpdateAvailable = IsUpdateAvailable(installedVersion, Version);
-                openClawConfigured = IsOpenClawConfigured();
-                openClawStatus.Text = openClawConfigured
-                    ? "OpenClaw: installed" + (installedVersion.Length > 0 ? " - version " + installedVersion : "")
-                    : "OpenClaw: installed - onboarding required";
+                openClawStatus.Text = "OpenClaw: installed" + (installedVersion.Length > 0 ? " - version " + installedVersion : "");
                 openClawStatus.ForeColor = Color.FromArgb(74, 222, 128);
-                install.Text = openClawConfigured ? "Open" : "Onboard";
+                install.Text = "Open";
                 updateLink.Visible = openClawUpdateAvailable;
                 addModel.Visible = false;
                 SetStatus(openClawUpdateAvailable
                         ? "A newer OpenClaw version (" + Version + ") is available - update when you are ready"
-                        : (openClawConfigured ? "OpenClaw is installed and ready" : "Complete OpenClaw onboarding before opening the dashboard"));
+                        : "OpenClaw is installed and ready");
             }
             else
             {
-                openClawConfigured = false;
                 openClawStatus.Text = "OpenClaw: not installed";
                 openClawStatus.ForeColor = Color.FromArgb(248, 113, 113);
                 install.Text = nodeReady ? "Install" : (nodeDetected ? "Upgrade Node" : "Install Node");
@@ -580,14 +567,6 @@ namespace NeonX.OpenClawInstaller
 
         private async Task OpenDashboardAsync()
         {
-            if (!IsOpenClawConfigured())
-            {
-                openClawConfigured = false;
-                install.Text = "Onboard";
-                LaunchOnboarding();
-                return;
-            }
-
             if (gatewayProcess != null && !gatewayProcess.HasExited && !string.IsNullOrWhiteSpace(gatewayToken))
             {
                 string runningUrl = "http://127.0.0.1:" + gatewayPort + "/#token=" + Uri.EscapeDataString(gatewayToken);
@@ -622,7 +601,7 @@ namespace NeonX.OpenClawInstaller
             SetStatus("Open 2/5 - Checking local gateway configuration");
             Write("[OPEN 2/5] Checking gateway.mode...");
             CommandResult mode = await RunOpenClawCaptureAsync("config get gateway.mode");
-            if (mode.ExitCode != 0 && ((mode.Output + mode.Error).IndexOf("unset", StringComparison.OrdinalIgnoreCase) >= 0))
+            if (mode.ExitCode != 0)
             {
                 Write("Setting gateway.mode=local for desktop use...");
                 mode = await RunOpenClawCaptureAsync("config set gateway.mode local");
@@ -768,12 +747,8 @@ namespace NeonX.OpenClawInstaller
                 Write("  - Could not load " + DefaultModelsFileName + ": " + ex.Message);
                 return;
             }
-            string provider = "{\"api\":\"openai-responses\",\"baseUrl\":\"https://api.neonx.ai/v1\",\"auth\":\"api-key\",\"authHeader\":true,\"headers\":{\"User-Agent\":\"neonx-agent/1.0\"}}";
-            CommandResult result = await RunOpenClawCaptureAsync("config set models.providers.neonx \"" + provider.Replace("\"", "\\\"") + "\" --strict-json --merge");
-            if (result.ExitCode == 0)
-            {
-                result = await RunOpenClawCaptureAsync("config set models.providers.neonx.models \"" + models.Replace("\"", "\\\"") + "\" --strict-json");
-            }
+            string provider = "{\"api\":\"openai-responses\",\"baseUrl\":\"https://api.neonx.ai/v1\",\"auth\":\"api-key\",\"authHeader\":true,\"headers\":{\"User-Agent\":\"neonx-agent/1.0\"},\"models\":" + models + "}";
+            CommandResult result = await RunOpenClawCaptureAsync("config set models.providers.neonx \"" + provider.Replace("\"", "\\\"") + "\" --strict-json");
             if (result.ExitCode == 0) Write("  - NeonX provider and default models synchronized.");
             else
             {
@@ -1167,41 +1142,6 @@ namespace NeonX.OpenClawInstaller
             }
         }
 
-        private void LaunchOnboarding()
-        {
-            try
-            {
-                string command = RefreshPath() + "; $c=Get-Command openclaw -ErrorAction SilentlyContinue; if(!$c){Write-Error 'OpenClaw was not found in PATH.'; exit 127}; & $c.Source onboard --mode local --suppress-gateway-token-output";
-                ProcessStartInfo info = new ProcessStartInfo(PowerShellPath(), "-NoLogo -NoProfile -ExecutionPolicy Bypass -Command " + Quote(command));
-                info.UseShellExecute = true;
-                info.WindowStyle = ProcessWindowStyle.Normal;
-                Process process = new Process();
-                process.StartInfo = info;
-                process.EnableRaisingEvents = true;
-                process.Exited += delegate
-                {
-                    process.Dispose();
-                    try
-                    {
-                        BeginInvoke(new Action(async delegate
-                        {
-                            await RefreshAgentsAsync();
-                            if (openClawInstalled && openClawConfigured) await OpenDashboardAsync();
-                        }));
-                    }
-                    catch (InvalidOperationException) { }
-                };
-                process.Start();
-                SetStatus("Complete onboarding in the OpenClaw terminal window");
-                Write("Opening the interactive OpenClaw onboarding wizard...");
-            }
-            catch (Exception error)
-            {
-                Write("[ERROR] Could not start onboarding: " + error.Message);
-                MessageBox.Show("Could not start OpenClaw onboarding.\r\n\r\n" + error.Message, "Onboarding failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-        }
-
         private static string FindNodeExecutablePath()
         {
             RefreshProcessEnvironmentPath();
@@ -1247,20 +1187,6 @@ namespace NeonX.OpenClawInstaller
             int end = value.IndexOf("</Objs>", marker, StringComparison.OrdinalIgnoreCase);
             if (end < 0) return value.Substring(0, marker).Trim();
             return (value.Substring(0, marker) + value.Substring(end + 7)).Trim();
-        }
-
-        private static bool IsOpenClawConfigured()
-        {
-            string configuredPath = Environment.GetEnvironmentVariable("OPENCLAW_CONFIG_PATH");
-            if (!string.IsNullOrWhiteSpace(configuredPath))
-                return File.Exists(Environment.ExpandEnvironmentVariables(configuredPath.Trim().Trim('"')));
-
-            string stateDirectory = Environment.GetEnvironmentVariable("OPENCLAW_STATE_DIR");
-            if (string.IsNullOrWhiteSpace(stateDirectory))
-                stateDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".openclaw");
-            else
-                stateDirectory = Environment.ExpandEnvironmentVariables(stateDirectory.Trim().Trim('"'));
-            return File.Exists(Path.Combine(stateDirectory, "openclaw.json"));
         }
 
         private static string PowerShellPath()
