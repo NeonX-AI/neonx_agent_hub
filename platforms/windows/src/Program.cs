@@ -239,7 +239,7 @@ namespace NeonX.OpenClawInstaller
             Controls.Add(copyright);
 
             FormClosing += OnFormClosing;
-            Shown += async delegate { CreateFirstRunDesktopShortcut(); await RefreshAgentsAsync(); };
+            Shown += async delegate { EnsureDesktopShortcut(); await RefreshAgentsAsync(); };
         }
 
         private async Task InstallAsync()
@@ -1234,14 +1234,11 @@ namespace NeonX.OpenClawInstaller
             button.FlatAppearance.BorderSize = 0;
         }
 
-        private void CreateFirstRunDesktopShortcut()
+        private void EnsureDesktopShortcut()
         {
-            string settingsDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NeonX", "AgentHub");
-            string markerPath = Path.Combine(settingsDirectory, "desktop-shortcut-created");
-            if (File.Exists(markerPath)) return;
-            if (!CreateDesktopShortcut(false)) return;
-            Directory.CreateDirectory(settingsDirectory);
-            File.WriteAllText(markerPath, DateTime.UtcNow.ToString("O"), Encoding.UTF8);
+            // Refresh the link on every launch so moving or replacing the Hub
+            // never leaves a stale shortcut pointing at an older executable.
+            CreateDesktopShortcut(false);
         }
 
         private bool CreateDesktopShortcut(bool notify = true)

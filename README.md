@@ -42,6 +42,7 @@ build.ps1                 Platform-aware root build entry point
 - OpenClaw detection through `openclaw --version`.
 - OpenClaw `2026.9.4` installation through the existing system `npm` command.
 - Embedded rounded NeonX header logo and Windows executable icon.
+- Desktop shortcut target is refreshed whenever the Hub starts, so replacing or moving the executable cannot leave a stale link to an older build.
 
 ## Build on Windows
 
