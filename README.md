@@ -9,7 +9,7 @@ The Windows release currently includes OpenClaw `2026.9.7`. On startup it checks
 - **Update** is shown as a separate optional action when a newer OpenClaw version is available; opening OpenClaw never prompts for or starts an update automatically.
 - Before updating, NeonX warns that configuration changes may require review or reconfiguration and asks the user to confirm.
 - **Stop** terminates the OpenClaw gateway started by NeonX and requests any managed OpenClaw gateway service to stop.
-- **Repair** stops the gateway, runs `openclaw doctor --fix` to repair and migrate the local OpenClaw databases, then restarts the gateway. Use it when OpenClaw reports an agent-database schema migration error.
+- **Repair** appears only after OpenClaw reports an agent-database schema migration error; it stops the gateway, runs `openclaw doctor --fix`, then restarts the gateway.
 - **Refresh** to run system detection again.
 
 The NeonX UI and multi-resolution Windows executable icon preserve the transparent background and full quality from `assets\images\logo\logo-light.png`. The OpenClaw card uses `assets\images\logo\openclaw.png`.

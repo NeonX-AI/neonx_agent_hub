@@ -81,6 +81,7 @@ namespace NeonX.OpenClawInstaller
         private Process gatewayProcess;
         private string gatewayToken = "";
         private int gatewayPort = 18789;
+        private volatile bool gatewayDatabaseRepairRequired;
 
         public InstallerForm()
         {
@@ -140,7 +141,7 @@ namespace NeonX.OpenClawInstaller
             card.Controls.Add(openClawStatus);
 
             ConfigureButton(install, "Checking...", 0, Color.FromArgb(8, 145, 178));
-            install.Location = new Point(620, 42);
+            install.Location = new Point(500, 42);
             install.Size = new Size(112, 42);
             install.Enabled = false;
             install.Click += async delegate { await HandleOpenClawActionAsync(); };
@@ -157,7 +158,7 @@ namespace NeonX.OpenClawInstaller
             card.Controls.Add(updateLink);
 
             ConfigureButton(repair, "Repair", 0, Color.FromArgb(180, 83, 9));
-            repair.Location = new Point(380, 42);
+            repair.Location = new Point(620, 42);
             repair.Size = new Size(110, 42);
             repair.Enabled = false;
             repair.Visible = false;
@@ -165,7 +166,7 @@ namespace NeonX.OpenClawInstaller
             card.Controls.Add(repair);
 
             ConfigureButton(stop, "Stop", 0, Color.FromArgb(185, 28, 28));
-            stop.Location = new Point(500, 42);
+            stop.Location = new Point(380, 42);
             stop.Size = new Size(110, 42);
             stop.Enabled = false;
             stop.Visible = false;
@@ -551,8 +552,8 @@ namespace NeonX.OpenClawInstaller
                 openClawStatus.ForeColor = Color.FromArgb(74, 222, 128);
                 install.Text = "Open";
                 updateLink.Visible = openClawUpdateAvailable;
-                repair.Visible = true;
-                repair.Enabled = true;
+                repair.Visible = false;
+                repair.Enabled = false;
                 addModel.Visible = false;
                 SetStatus(openClawUpdateAvailable
                         ? "A newer OpenClaw version (" + Version + ") is available - update when you are ready"
@@ -603,6 +604,9 @@ namespace NeonX.OpenClawInstaller
             install.Enabled = false;
             install.Text = "Opening...";
             stop.Visible = false;
+            repair.Visible = false;
+            repair.Enabled = false;
+            gatewayDatabaseRepairRequired = false;
             progress.Style = ProgressBarStyle.Blocks;
             progress.Value = 5;
             log.Clear();
@@ -665,9 +669,16 @@ namespace NeonX.OpenClawInstaller
                     gatewayReady = await WaitForGatewayAsync(gatewayPort);
                 if (!gatewayReady)
                 {
-                    ShowDashboardError(new CommandResult(1, "", string.IsNullOrWhiteSpace(gatewayError)
+                    string error = string.IsNullOrWhiteSpace(gatewayError)
                         ? "The OpenClaw gateway did not become ready after two attempts. Check the OpenClaw gateway log for details."
-                        : gatewayError));
+                        : gatewayError;
+                    if (gatewayDatabaseRepairRequired)
+                    {
+                        repair.Visible = true;
+                        repair.Enabled = true;
+                        error = "OpenClaw reports that an agent database schema migration is required. Click Repair to run openclaw doctor --fix, then NeonX will restart the gateway.";
+                    }
+                    ShowDashboardError(new CommandResult(1, "", error));
                 }
             }
             if (gatewayReady)
@@ -747,9 +758,8 @@ namespace NeonX.OpenClawInstaller
 
                 SetStatus("Repair 2/3 - Migrating OpenClaw agent databases");
                 Write("[REPAIR 2/3] Running openclaw doctor --fix...");
-                CommandResult result = await RunOpenClawCaptureAsync("doctor --fix");
+                CommandResult result = await RunOpenClawStreamingCaptureAsync("doctor --fix", "[doctor]");
                 string details = StripPowerShellClixml(string.IsNullOrWhiteSpace(result.Error) ? result.Output : result.Error);
-                if (!string.IsNullOrWhiteSpace(details)) Write("[doctor] " + details);
                 if (result.ExitCode != 0)
                     throw new InvalidOperationException(string.IsNullOrWhiteSpace(details)
                         ? "OpenClaw doctor --fix returned error code " + result.ExitCode + "."
@@ -922,6 +932,46 @@ namespace NeonX.OpenClawInstaller
             }
         }
 
+        private async Task<CommandResult> RunOpenClawStreamingCaptureAsync(string arguments, string logPrefix)
+        {
+            string nodePath = FindNodeExecutablePath();
+            string openClawEntry = FindOpenClawEntryPath();
+            if (nodePath.Length == 0) return new CommandResult(127, "", "System node.exe was not found.");
+            if (openClawEntry.Length == 0) return new CommandResult(127, "", "The OpenClaw package entry point was not found.");
+
+            ProcessStartInfo info = new ProcessStartInfo(nodePath, Quote(openClawEntry) + " " + arguments);
+            info.UseShellExecute = false;
+            info.CreateNoWindow = true;
+            info.RedirectStandardOutput = true;
+            info.RedirectStandardError = true;
+            info.StandardOutputEncoding = Encoding.UTF8;
+            info.StandardErrorEncoding = Encoding.UTF8;
+            StringBuilder output = new StringBuilder();
+            StringBuilder error = new StringBuilder();
+            object outputLock = new object();
+            using (Process process = new Process())
+            {
+                process.StartInfo = info;
+                process.OutputDataReceived += delegate(object sender, DataReceivedEventArgs eventArgs)
+                {
+                    if (string.IsNullOrWhiteSpace(eventArgs.Data)) return;
+                    lock (outputLock) output.AppendLine(eventArgs.Data);
+                    Write(logPrefix + " " + eventArgs.Data);
+                };
+                process.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs eventArgs)
+                {
+                    if (string.IsNullOrWhiteSpace(eventArgs.Data)) return;
+                    lock (outputLock) error.AppendLine(eventArgs.Data);
+                    Write(logPrefix + " " + eventArgs.Data);
+                };
+                process.Start();
+                process.BeginOutputReadLine();
+                process.BeginErrorReadLine();
+                await Task.Run(delegate { process.WaitForExit(); });
+                lock (outputLock) return new CommandResult(process.ExitCode, output.ToString(), error.ToString());
+            }
+        }
+
         private async Task<CommandResult> RunNodeCaptureAsync(string arguments)
         {
             string nodePath = FindNodeExecutablePath();
@@ -977,10 +1027,14 @@ namespace NeonX.OpenClawInstaller
                     {
                         if (!string.IsNullOrWhiteSpace(eventArgs.Data)) Write("[gateway] " + eventArgs.Data);
                     };
-                    gatewayProcess.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs eventArgs)
+                gatewayProcess.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs eventArgs)
+                {
+                    if (!string.IsNullOrWhiteSpace(eventArgs.Data))
                     {
-                        if (!string.IsNullOrWhiteSpace(eventArgs.Data)) Write("[gateway error] " + eventArgs.Data);
-                    };
+                        if (RequiresDatabaseRepair(eventArgs.Data)) gatewayDatabaseRepairRequired = true;
+                        Write("[gateway error] " + eventArgs.Data);
+                    }
+                };
                     gatewayProcess.BeginOutputReadLine();
                     gatewayProcess.BeginErrorReadLine();
                 }
@@ -1257,6 +1311,12 @@ namespace NeonX.OpenClawInstaller
             int end = value.IndexOf("</Objs>", marker, StringComparison.OrdinalIgnoreCase);
             if (end < 0) return value.Substring(0, marker).Trim();
             return (value.Substring(0, marker) + value.Substring(end + 7)).Trim();
+        }
+
+        private static bool RequiresDatabaseRepair(string value)
+        {
+            return !string.IsNullOrWhiteSpace(value)
+                && value.IndexOf("doctor --fix", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private static string PowerShellPath()
