@@ -2,13 +2,14 @@
 
 NeonX Agent Hub is a desktop catalog for installing and opening local AI agents.
 
-The Windows release currently includes OpenClaw `2026.9.4`. On startup it checks whether the required components are available and displays the appropriate action:
+The Windows release currently includes OpenClaw `2026.9.7`. On startup it checks whether the required components are available and displays the appropriate action:
 
 - **Install** when OpenClaw is not installed.
 - **Open** when OpenClaw is installed; NeonX creates the required local configuration automatically, starts the gateway with a freshly generated secure token, and launches the authenticated Control UI in the default browser.
 - **Update** is shown as a separate optional action when a newer OpenClaw version is available; opening OpenClaw never prompts for or starts an update automatically.
 - Before updating, NeonX warns that configuration changes may require review or reconfiguration and asks the user to confirm.
 - **Stop** terminates the OpenClaw gateway started by NeonX and requests any managed OpenClaw gateway service to stop.
+- **Repair** stops the gateway, runs `openclaw doctor --fix` to repair and migrate the local OpenClaw databases, then restarts the gateway. Use it when OpenClaw reports an agent-database schema migration error.
 - **Refresh** to run system detection again.
 
 The NeonX UI and multi-resolution Windows executable icon preserve the transparent background and full quality from `assets\images\logo\logo-light.png`. The OpenClaw card uses `assets\images\logo\openclaw.png`.
@@ -40,7 +41,7 @@ build.ps1                 Platform-aware root build entry point
 - Incompatible or missing Node.js changes the action to **Upgrade Node** or **Install Node**.
 - NeonX explains the OpenClaw compatibility requirement, downloads the official Node.js 26 MSI, verifies SHA-256, requests Administrator permission, and installs Node system-wide.
 - OpenClaw detection through `openclaw --version`.
-- OpenClaw `2026.9.4` installation through the existing system `npm` command.
+- OpenClaw `2026.9.7` installation through the existing system `npm` command.
 - Embedded rounded NeonX header logo and Windows executable icon.
 - Desktop shortcut target is refreshed whenever the Hub starts, so replacing or moving the executable cannot leave a stale link to an older build.
 

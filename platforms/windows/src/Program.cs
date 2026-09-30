@@ -58,6 +58,7 @@ namespace NeonX.OpenClawInstaller
         private readonly RichTextBox log = new RichTextBox();
         private readonly Button install = new Button();
         private readonly LinkLabel updateLink = new LinkLabel();
+        private readonly Button repair = new Button();
         private readonly Button stop = new Button();
         private readonly Button close = new Button();
         private readonly Button refresh = new Button();
@@ -154,6 +155,14 @@ namespace NeonX.OpenClawInstaller
             updateLink.Visible = false;
             updateLink.LinkClicked += async delegate { await UpdateOpenClawAsync(); };
             card.Controls.Add(updateLink);
+
+            ConfigureButton(repair, "Repair", 0, Color.FromArgb(180, 83, 9));
+            repair.Location = new Point(380, 42);
+            repair.Size = new Size(110, 42);
+            repair.Enabled = false;
+            repair.Visible = false;
+            repair.Click += async delegate { await RepairOpenClawAsync(); };
+            card.Controls.Add(repair);
 
             ConfigureButton(stop, "Stop", 0, Color.FromArgb(185, 28, 28));
             stop.Location = new Point(500, 42);
@@ -542,6 +551,8 @@ namespace NeonX.OpenClawInstaller
                 openClawStatus.ForeColor = Color.FromArgb(74, 222, 128);
                 install.Text = "Open";
                 updateLink.Visible = openClawUpdateAvailable;
+                repair.Visible = true;
+                repair.Enabled = true;
                 addModel.Visible = false;
                 SetStatus(openClawUpdateAvailable
                         ? "A newer OpenClaw version (" + Version + ") is available - update when you are ready"
@@ -553,6 +564,8 @@ namespace NeonX.OpenClawInstaller
                 openClawStatus.ForeColor = Color.FromArgb(248, 113, 113);
                 install.Text = nodeReady ? "Install" : (nodeDetected ? "Upgrade Node" : "Install Node");
                 updateLink.Visible = false;
+                repair.Visible = false;
+                repair.Enabled = false;
                 addModel.Visible = false;
                 SetStatus(nodeReady
                     ? "OpenClaw is available to install"
@@ -708,6 +721,63 @@ namespace NeonX.OpenClawInstaller
                 stop.Enabled = false;
                 stop.Visible = false;
             }
+        }
+
+        private async Task RepairOpenClawAsync()
+        {
+            if (busy || !openClawInstalled) return;
+            DialogResult answer = MessageBox.Show(
+                "NeonX will stop the OpenClaw gateway, run the official OpenClaw database repair and migration command (doctor --fix), then restart the gateway.\r\n\r\nUse this when the gateway reports that an agent database schema needs migration. Continue?",
+                "Repair OpenClaw database", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+            if (answer != DialogResult.Yes) return;
+
+            busy = true;
+            SetEnabled(false);
+            repair.Text = "Repairing...";
+            progress.Style = ProgressBarStyle.Marquee;
+            progress.Value = 0;
+            log.Clear();
+            SetStatus("Repair 1/3 - Stopping the OpenClaw gateway");
+            Write("[REPAIR 1/3] Stopping the gateway before database repair...");
+
+            try
+            {
+                await StopOpenClawGatewayAsync();
+                await Task.Delay(500);
+
+                SetStatus("Repair 2/3 - Migrating OpenClaw agent databases");
+                Write("[REPAIR 2/3] Running openclaw doctor --fix...");
+                CommandResult result = await RunOpenClawCaptureAsync("doctor --fix");
+                string details = StripPowerShellClixml(string.IsNullOrWhiteSpace(result.Error) ? result.Output : result.Error);
+                if (!string.IsNullOrWhiteSpace(details)) Write("[doctor] " + details);
+                if (result.ExitCode != 0)
+                    throw new InvalidOperationException(string.IsNullOrWhiteSpace(details)
+                        ? "OpenClaw doctor --fix returned error code " + result.ExitCode + "."
+                        : "OpenClaw doctor --fix failed: " + details);
+
+                progress.Style = ProgressBarStyle.Blocks;
+                progress.Value = 100;
+                SetStatus("Repair complete - restarting OpenClaw");
+                Write("[COMPLETE] OpenClaw database repair completed. Restarting the gateway...");
+            }
+            catch (Exception error)
+            {
+                progress.Style = ProgressBarStyle.Blocks;
+                progress.Value = 0;
+                SetStatus("OpenClaw repair did not complete");
+                Write("[ERROR] " + error.Message);
+                MessageBox.Show(error.Message, "OpenClaw repair failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+            finally
+            {
+                busy = false;
+                repair.Text = "Repair";
+                SetEnabled(true);
+            }
+
+            await RefreshAgentsAsync();
+            if (openClawInstalled) await OpenDashboardAsync();
         }
 
         private async Task StopOpenClawGatewayAsync()
@@ -1272,6 +1342,7 @@ namespace NeonX.OpenClawInstaller
         {
             install.Enabled = enabled;
             updateLink.Enabled = enabled && updateLink.Visible;
+            repair.Enabled = enabled && repair.Visible && openClawInstalled;
             stop.Enabled = enabled && openClawInstalled;
             close.Enabled = enabled;
             refresh.Enabled = enabled;
