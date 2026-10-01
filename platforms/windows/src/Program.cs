@@ -907,28 +907,26 @@ namespace NeonX.OpenClawInstaller
                 return;
             }
 
-            if (HasFastCodexThreadIntegrationConfig())
+            if (HasCodexWriteControlsConfig())
             {
-                Write("  - Codex threads already use your shared .codex home; background catalog scanning remains disabled.");
+                Write("  - Codex thread write controls are already enabled.");
                 return;
             }
 
-            // The shared user home is sufficient for /codex threads. Do not
-            // start the session catalog or supervision scan here: either can
-            // enumerate a large native Codex history and block gateway startup.
-            // One merged write preserves all unrelated Codex plugin settings.
-            const string integrationConfig = "{\"sessionCatalog\":{\"enabled\":false},\"supervision\":{\"enabled\":false,\"allowWriteControls\":true},\"appServer\":{\"transport\":\"stdio\",\"homeScope\":\"user\"}}";
-            CommandResult configured = await RunOpenClawCaptureAsync("config set plugins.entries.codex.config \"" + integrationConfig.Replace("\"", "\\\"") + "\" --strict-json --merge");
+            // Keep this narrowly scoped. Enabling the session catalog or
+            // forcing a shared app-server home can make gateway startup scan
+            // a large native Codex history.
+            CommandResult configured = await RunOpenClawCaptureAsync("config set plugins.entries.codex.config.supervision.allowWriteControls true --strict-json");
             if (configured.ExitCode == 0)
             {
-                Write("  - Codex threads use your shared .codex home; background catalog scanning is disabled for fast startup.");
+                Write("  - Codex thread write controls enabled.");
                 return;
             }
             string details = StripPowerShellClixml(string.IsNullOrWhiteSpace(configured.Error) ? configured.Output : configured.Error);
-            Write("  - Could not configure Codex thread discovery: " + details);
+            Write("  - Could not enable Codex thread write controls: " + details);
         }
 
-        private static bool HasFastCodexThreadIntegrationConfig()
+        private static bool HasCodexWriteControlsConfig()
         {
             try
             {
@@ -939,17 +937,10 @@ namespace NeonX.OpenClawInstaller
                 Dictionary<string, object> entries = GetJsonObject(plugins, "entries");
                 Dictionary<string, object> codex = GetJsonObject(entries, DefaultCodexPluginId);
                 Dictionary<string, object> config = GetJsonObject(codex, "config");
-                Dictionary<string, object> catalog = GetJsonObject(config, "sessionCatalog");
                 Dictionary<string, object> supervision = GetJsonObject(config, "supervision");
-                Dictionary<string, object> appServer = GetJsonObject(config, "appServer");
-                object catalogEnabled;
                 object allowWriteControls;
-                object transport;
-                object homeScope;
-                return catalog != null && catalog.TryGetValue("enabled", out catalogEnabled) && catalogEnabled is bool && !(bool)catalogEnabled
-                    && supervision != null && supervision.TryGetValue("allowWriteControls", out allowWriteControls) && allowWriteControls is bool && (bool)allowWriteControls
-                    && appServer != null && appServer.TryGetValue("transport", out transport) && "stdio".Equals(transport as string, StringComparison.OrdinalIgnoreCase)
-                    && appServer.TryGetValue("homeScope", out homeScope) && "user".Equals(homeScope as string, StringComparison.OrdinalIgnoreCase);
+                return supervision != null && supervision.TryGetValue("allowWriteControls", out allowWriteControls)
+                    && allowWriteControls is bool && (bool)allowWriteControls;
             }
             catch { return false; }
         }
