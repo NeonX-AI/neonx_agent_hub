@@ -55,10 +55,6 @@ namespace NeonX.OpenClawInstaller
         private const string NodeX64Sha256 = ComponentVersions.NodeX64Sha256;
         private const string NodeArm64Sha256 = ComponentVersions.NodeArm64Sha256;
         private const string DefaultModelsFileName = "default-models.json";
-        private const string DefaultCodexPluginId = "codex";
-        // Use an explicit npm source so OpenClaw installs this package directly
-        // without requiring its dashboard or gateway to be running first.
-        private const string DefaultCodexPluginPackage = "npm:@openclaw/codex@" + CodexPluginVersion;
         private readonly Label status = new Label();
         private readonly ProgressBar progress = new ProgressBar();
         private readonly RichTextBox log = new RichTextBox();
@@ -76,7 +72,6 @@ namespace NeonX.OpenClawInstaller
         private RoundedPanel agentCard;
         private readonly Label nodeStatus = new Label();
         private readonly Label openClawStatus = new Label();
-        private readonly LinkLabel codexPluginNotice = new LinkLabel();
         private readonly BufferedOverlay closingOverlay = new BufferedOverlay();
         private readonly Timer closingTimer = new Timer();
         private readonly Font closingFont = new Font("Segoe UI Semibold", 11F);
@@ -151,16 +146,6 @@ namespace NeonX.OpenClawInstaller
             openClawStatus.Font = new Font("Segoe UI Semibold", 8.5F, FontStyle.Bold);
             openClawStatus.Location = new Point(106, 109);
             card.Controls.Add(openClawStatus);
-
-            codexPluginNotice.Text = "Codex plugin is not installed - click to install";
-            codexPluginNotice.LinkColor = Color.FromArgb(251, 191, 36);
-            codexPluginNotice.ActiveLinkColor = Color.White;
-            codexPluginNotice.AutoSize = true;
-            codexPluginNotice.Font = new Font("Segoe UI Semibold", 8.5F, FontStyle.Bold);
-            codexPluginNotice.Location = new Point(106, 130);
-            codexPluginNotice.Visible = false;
-            codexPluginNotice.LinkClicked += async delegate { await InstallCodexPluginAsync(); };
-            card.Controls.Add(codexPluginNotice);
 
             ConfigureButton(install, "Checking...", 0, Color.FromArgb(8, 145, 178));
             install.Location = new Point(620, 42);
@@ -345,7 +330,6 @@ namespace NeonX.OpenClawInstaller
                 openClawInstalled = true;
                 openClawStatus.Text = "OpenClaw: installed - version " + Version;
                 openClawStatus.ForeColor = Color.FromArgb(74, 222, 128);
-                UpdateCodexPluginNotice();
                 install.Text = "Open";
                 SetStatus("OpenClaw installed successfully");
                 Write("[COMPLETE] OpenClaw is ready.");
@@ -601,7 +585,6 @@ namespace NeonX.OpenClawInstaller
                 openClawStatus.ForeColor = openClawUpdateAvailable
                     ? Color.FromArgb(251, 191, 36)
                     : Color.FromArgb(74, 222, 128);
-                UpdateCodexPluginNotice();
                 install.Text = "Open";
                 updateLink.Visible = openClawUpdateAvailable;
                 SetUninstallVisibility(true);
@@ -614,8 +597,6 @@ namespace NeonX.OpenClawInstaller
             {
                 openClawStatus.Text = "OpenClaw: not installed";
                 openClawStatus.ForeColor = Color.FromArgb(248, 113, 113);
-                codexPluginNotice.Visible = false;
-                codexPluginNotice.Enabled = false;
                 install.Text = nodeReady ? "Install" : (nodeDetected ? "Upgrade Node" : "Install Node");
                 updateLink.Visible = false;
                 SetUninstallVisibility(false);
@@ -660,18 +641,13 @@ namespace NeonX.OpenClawInstaller
             progress.Style = ProgressBarStyle.Blocks;
             progress.Value = 5;
             log.Clear();
-            SetStatus("Open 1/6 - Synchronizing NeonX models");
-            Write("[OPEN 1/6] OpenClaw is installed. Synchronizing the default NeonX models...");
+            SetStatus("Open 1/5 - Synchronizing NeonX models");
+            Write("[OPEN 1/5] OpenClaw is installed. Synchronizing the default NeonX models...");
             await EnsureDefaultNeonxModelsAsync();
 
-            progress.Value = 20;
-            SetStatus("Open 2/6 - Checking Codex plugin integration");
-            Write("[OPEN 2/6] Checking whether the installed Codex plugin can discover your native Codex threads...");
-            await EnsureCodexPluginIntegrationAsync();
-
-            progress.Value = 35;
-            SetStatus("Open 3/6 - Checking local gateway configuration");
-            Write("[OPEN 3/6] Checking gateway.mode...");
+            progress.Value = 25;
+            SetStatus("Open 2/5 - Checking local gateway configuration");
+            Write("[OPEN 2/5] Checking gateway.mode...");
             CommandResult mode = await RunOpenClawCaptureAsync("config get gateway.mode");
             if (mode.ExitCode != 0)
             {
@@ -687,9 +663,9 @@ namespace NeonX.OpenClawInstaller
                 return;
             }
 
-            progress.Value = 50;
-            SetStatus("Open 4/6 - Resolving the gateway port");
-            Write("[OPEN 4/6] Reading the configured gateway port...");
+            progress.Value = 45;
+            SetStatus("Open 3/5 - Resolving the gateway port");
+            Write("[OPEN 3/5] Reading the configured gateway port...");
             CommandResult portResult = await RunOpenClawCaptureAsync("config get gateway.port");
             int configuredPort;
             if (portResult.ExitCode == 0 && int.TryParse(LastNonEmptyLine(portResult.Output), out configuredPort) && configuredPort > 0 && configuredPort <= 65535)
@@ -697,8 +673,8 @@ namespace NeonX.OpenClawInstaller
             Write("Gateway port: " + gatewayPort);
 
             progress.Value = 65;
-            SetStatus("Open 5/6 - Restarting the OpenClaw gateway");
-            Write("[OPEN 5/6] Stopping any existing gateway, then starting fresh so new settings apply...");
+            SetStatus("Open 4/5 - Restarting the OpenClaw gateway");
+            Write("[OPEN 4/5] Stopping any existing gateway, then starting fresh so new settings apply...");
             await StopOpenClawGatewayAsync();
             // OpenClaw may need several seconds to release the old listener and
             // open its database/plugins before the new process can bind.
@@ -714,8 +690,8 @@ namespace NeonX.OpenClawInstaller
             }
 
             progress.Value = 80;
-            SetStatus("Open 6/6 - Waiting for the Control UI");
-            Write("[OPEN 6/6] Gateway process started. Waiting for the Control UI...");
+            SetStatus("Open 5/5 - Waiting for the Control UI");
+            Write("[OPEN 5/5] Gateway process started. Waiting for the Control UI...");
             bool gatewayReady = await WaitForGatewayAsync(gatewayPort);
             if (!gatewayReady)
             {
@@ -886,7 +862,9 @@ namespace NeonX.OpenClawInstaller
                 return;
             }
             string provider = "{\"api\":\"openai-responses\",\"baseUrl\":\"https://api.neonx.ai/v1\",\"auth\":\"api-key\",\"authHeader\":true,\"headers\":{\"User-Agent\":\"neonx-agent/1.0\"},\"models\":" + models + "}";
-            CommandResult result = await RunOpenClawCaptureAsync("config set models.providers.neonx \"" + provider.Replace("\"", "\\\"") + "\" --strict-json");
+            // Keep user-owned provider settings such as apiKey while replacing
+            // the bundled NeonX model list.
+            CommandResult result = await RunOpenClawCaptureAsync("config set models.providers.neonx \"" + provider.Replace("\"", "\\\"") + "\" --strict-json --merge");
             if (result.ExitCode == 0) Write("  - NeonX provider and default models synchronized.");
             else
             {
@@ -894,181 +872,6 @@ namespace NeonX.OpenClawInstaller
                 Write("  - Could not synchronize the NeonX provider and default models: " + StripPowerShellClixml(details));
             }
 
-            CommandResult memory = await RunOpenClawCaptureAsync("config set memory.search.provider none");
-            if (memory.ExitCode == 0) Write("  - Memory uses local FTS search; implicit OpenAI embeddings disabled.");
-            else Write("  - Could not disable implicit OpenAI memory embeddings: " + StripPowerShellClixml(memory.Error));
-        }
-
-        private async Task EnsureCodexPluginIntegrationAsync()
-        {
-            if (!GetInstalledCodexPluginVersion().Equals(CodexPluginVersion, StringComparison.OrdinalIgnoreCase))
-            {
-                Write("  - Codex plugin " + CodexPluginVersion + " is not installed; skipped native Codex thread discovery setup.");
-                return;
-            }
-
-            if (HasCodexWriteControlsConfig())
-            {
-                Write("  - Codex thread write controls are already enabled.");
-                return;
-            }
-
-            // Keep this narrowly scoped. Enabling the session catalog or
-            // forcing a shared app-server home can make gateway startup scan
-            // a large native Codex history.
-            CommandResult configured = await RunOpenClawCaptureAsync("config set plugins.entries.codex.config.supervision.allowWriteControls true --strict-json");
-            if (configured.ExitCode == 0)
-            {
-                Write("  - Codex thread write controls enabled.");
-                return;
-            }
-            string details = StripPowerShellClixml(string.IsNullOrWhiteSpace(configured.Error) ? configured.Output : configured.Error);
-            Write("  - Could not enable Codex thread write controls: " + details);
-        }
-
-        private static bool HasCodexWriteControlsConfig()
-        {
-            try
-            {
-                string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".openclaw", "openclaw.json");
-                if (!File.Exists(path)) return false;
-                Dictionary<string, object> root = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText(path, Encoding.UTF8));
-                Dictionary<string, object> plugins = GetJsonObject(root, "plugins");
-                Dictionary<string, object> entries = GetJsonObject(plugins, "entries");
-                Dictionary<string, object> codex = GetJsonObject(entries, DefaultCodexPluginId);
-                Dictionary<string, object> config = GetJsonObject(codex, "config");
-                Dictionary<string, object> supervision = GetJsonObject(config, "supervision");
-                object allowWriteControls;
-                return supervision != null && supervision.TryGetValue("allowWriteControls", out allowWriteControls)
-                    && allowWriteControls is bool && (bool)allowWriteControls;
-            }
-            catch { return false; }
-        }
-
-        private static Dictionary<string, object> GetJsonObject(Dictionary<string, object> source, string key)
-        {
-            if (source == null) return null;
-            object value;
-            return source.TryGetValue(key, out value) ? value as Dictionary<string, object> : null;
-        }
-
-        private async Task InstallCodexPluginAsync()
-        {
-            if (busy || !openClawInstalled) return;
-            if (MessageBox.Show(
-                "Install and enable OpenClaw Codex plugin " + CodexPluginVersion + "? If a different version is installed, NeonX will replace it, including a newer version. The plugin's declared capabilities will be accepted during installation.",
-                "Install Codex plugin", MessageBoxButtons.YesNo, MessageBoxIcon.Information) != DialogResult.Yes) return;
-
-            busy = true;
-            SetEnabled(false);
-            codexPluginNotice.Enabled = false;
-            progress.Style = ProgressBarStyle.Marquee;
-            progress.Value = 0;
-            log.Clear();
-            SetStatus("Installing the OpenClaw Codex plugin - live logs appear below");
-            Write("[CODEX] Installing the official Codex plugin " + CodexPluginVersion + "...");
-
-            try
-            {
-                Write("[CODEX] Command: openclaw plugins install " + DefaultCodexPluginPackage + " --force --accept-capabilities");
-                CommandResult installed = await RunOpenClawStreamingCaptureAsync("plugins install " + DefaultCodexPluginPackage + " --force --accept-capabilities", "[codex]");
-                string details = StripPowerShellClixml(string.IsNullOrWhiteSpace(installed.Error) ? installed.Output : installed.Error);
-                if (installed.ExitCode != 0)
-                    throw new InvalidOperationException(string.IsNullOrWhiteSpace(details)
-                        ? "Codex plugin installation returned error code " + installed.ExitCode + "."
-                        : details);
-
-                Write("[CODEX] Enabling the Codex plugin...");
-                Write("[CODEX] Command: openclaw plugins enable " + DefaultCodexPluginId + " --accept-capabilities");
-                CommandResult enabled = await RunOpenClawStreamingCaptureAsync("plugins enable " + DefaultCodexPluginId + " --accept-capabilities", "[codex]");
-                details = StripPowerShellClixml(string.IsNullOrWhiteSpace(enabled.Error) ? enabled.Output : enabled.Error);
-                if (enabled.ExitCode != 0)
-                    throw new InvalidOperationException(string.IsNullOrWhiteSpace(details)
-                        ? "Codex plugin enablement returned error code " + enabled.ExitCode + "."
-                        : details);
-
-                progress.Style = ProgressBarStyle.Blocks;
-                progress.Value = 100;
-                SetStatus("The OpenClaw Codex plugin is installed and enabled");
-                Write("[COMPLETE] Codex plugin is ready.");
-            }
-            catch (Exception error)
-            {
-                progress.Style = ProgressBarStyle.Blocks;
-                progress.Value = 0;
-                SetStatus("Codex plugin installation did not complete");
-                Write("[ERROR] " + error.Message);
-                MessageBox.Show(error.Message, "Codex plugin installation failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-            finally
-            {
-                busy = false;
-            }
-            await RefreshAgentsAsync();
-        }
-
-        private void UpdateCodexPluginNotice()
-        {
-            string installedVersion = GetInstalledCodexPluginVersion();
-            if (installedVersion.Equals(CodexPluginVersion, StringComparison.OrdinalIgnoreCase))
-            {
-                codexPluginNotice.Text = "Codex plugin: " + installedVersion + " - current";
-                codexPluginNotice.LinkArea = new LinkArea(0, 0);
-                codexPluginNotice.LinkColor = Color.FromArgb(74, 222, 128);
-                codexPluginNotice.ForeColor = Color.FromArgb(74, 222, 128);
-                codexPluginNotice.Cursor = Cursors.Default;
-                codexPluginNotice.Visible = true;
-                codexPluginNotice.Enabled = true;
-                return;
-            }
-            codexPluginNotice.Text = string.IsNullOrWhiteSpace(installedVersion)
-                ? "Codex plugin is not installed - click to install " + CodexPluginVersion
-                : "Codex plugin " + installedVersion + " found; target is " + CodexPluginVersion + " - click to install";
-            codexPluginNotice.LinkArea = new LinkArea(0, codexPluginNotice.Text.Length);
-            Color noticeColor = string.IsNullOrWhiteSpace(installedVersion)
-                ? Color.FromArgb(226, 232, 240)
-                : Color.FromArgb(251, 191, 36);
-            codexPluginNotice.LinkColor = noticeColor;
-            codexPluginNotice.ForeColor = noticeColor;
-            codexPluginNotice.Cursor = Cursors.Hand;
-            codexPluginNotice.Visible = true;
-            codexPluginNotice.Enabled = !busy && openClawInstalled;
-        }
-
-        private static string GetInstalledCodexPluginVersion()
-        {
-            string openClawDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".openclaw");
-            // Older OpenClaw releases used this extension directory.
-            string installedVersion = ReadPackageVersion(Path.Combine(openClawDirectory, "extensions", DefaultCodexPluginId, "package.json"));
-            if (!string.IsNullOrWhiteSpace(installedVersion)) return installedVersion;
-
-            // npm plugins are installed in an isolated project rather than
-            // .openclaw\extensions. The suffix is generated by OpenClaw, so
-            // inspect each Codex project instead of depending on a fixed name.
-            string projectsDirectory = Path.Combine(openClawDirectory, "npm", "projects");
-            if (!Directory.Exists(projectsDirectory)) return "";
-            try
-            {
-                foreach (string projectDirectory in Directory.GetDirectories(projectsDirectory, "openclaw-codex-*"))
-                {
-                    installedVersion = ReadPackageVersion(Path.Combine(projectDirectory, "node_modules", "@openclaw", "codex", "package.json"));
-                    if (!string.IsNullOrWhiteSpace(installedVersion)) return installedVersion;
-                }
-            }
-            catch { }
-            return "";
-        }
-
-        private static string ReadPackageVersion(string packagePath)
-        {
-            if (!File.Exists(packagePath)) return "";
-            try
-            {
-                Dictionary<string, object> package = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText(packagePath, Encoding.UTF8));
-                object version;
-                return package != null && package.TryGetValue("version", out version) ? (version as string ?? "") : "";
-            }
-            catch { return ""; }
         }
 
         private static void DeleteOpenClawDataDirectory()
@@ -1345,7 +1148,7 @@ namespace NeonX.OpenClawInstaller
                 if (attempt % 4 == 0)
                 {
                     int elapsedSeconds = attempt / 2;
-                    SetStatus("Open 6/6 - Waiting for Control UI (" + elapsedSeconds + "s)");
+                    SetStatus("Open 5/5 - Waiting for Control UI (" + elapsedSeconds + "s)");
                     Write("  - Waiting for Control UI: " + elapsedSeconds + " seconds elapsed...");
                     progress.Value = Math.Min(98, 80 + attempt / 2);
                 }
@@ -1659,7 +1462,6 @@ namespace NeonX.OpenClawInstaller
         {
             install.Enabled = enabled;
             updateLink.Enabled = enabled && updateLink.Visible;
-            codexPluginNotice.Enabled = enabled && codexPluginNotice.Visible && openClawInstalled;
             uninstall.Enabled = enabled && uninstall.Visible && openClawInstalled;
             agentMenu.Enabled = enabled && agentMenu.Visible && openClawInstalled;
             stop.Enabled = enabled && openClawInstalled;
