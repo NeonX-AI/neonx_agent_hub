@@ -27,6 +27,7 @@ namespace NeonX.OpenClawInstaller
         private static void Main()
         {
             Environment.SetEnvironmentVariable("NEONX_OPENCLAW_VERSION", ComponentVersions.OpenClaw, EnvironmentVariableTarget.Process);
+            Environment.SetEnvironmentVariable("NEONX_OPENCLAW_CODEX_VERSION", ComponentVersions.OpenClawCodex, EnvironmentVariableTarget.Process);
             Environment.SetEnvironmentVariable("NEONX_NODEJS_VERSION", ComponentVersions.NodeJs, EnvironmentVariableTarget.Process);
             Environment.SetEnvironmentVariable("NEONX_NODEJS_X64_SHA256", ComponentVersions.NodeX64Sha256, EnvironmentVariableTarget.Process);
             Environment.SetEnvironmentVariable("NEONX_NODEJS_ARM64_SHA256", ComponentVersions.NodeArm64Sha256, EnvironmentVariableTarget.Process);
@@ -48,25 +49,34 @@ namespace NeonX.OpenClawInstaller
     internal sealed class InstallerForm : Form
     {
         private const string Version = ComponentVersions.OpenClaw;
+        private const string CodexPluginVersion = ComponentVersions.OpenClawCodex;
         private const string HubVersion = ComponentVersions.Hub;
         private const string RecommendedNodeVersion = ComponentVersions.NodeJsDistribution;
         private const string NodeX64Sha256 = ComponentVersions.NodeX64Sha256;
         private const string NodeArm64Sha256 = ComponentVersions.NodeArm64Sha256;
         private const string DefaultModelsFileName = "default-models.json";
+        private const string DefaultCodexPluginId = "codex";
+        // Use an explicit npm source so OpenClaw installs this package directly
+        // without requiring its dashboard or gateway to be running first.
+        private const string DefaultCodexPluginPackage = "npm:@openclaw/codex@" + CodexPluginVersion;
         private readonly Label status = new Label();
         private readonly ProgressBar progress = new ProgressBar();
         private readonly RichTextBox log = new RichTextBox();
         private readonly Button install = new Button();
         private readonly LinkLabel updateLink = new LinkLabel();
-        private readonly Button repair = new Button();
+        private readonly Button uninstall = new Button();
+        private readonly Button agentMenu = new Button();
+        private readonly ContextMenuStrip agentMenuItems = new ContextMenuStrip();
         private readonly Button stop = new Button();
         private readonly Button close = new Button();
         private readonly Button refresh = new Button();
         private readonly Button desktopShortcut = new Button();
         private readonly Button addModel = new Button();
         private readonly LinkLabel source = new LinkLabel();
+        private RoundedPanel agentCard;
         private readonly Label nodeStatus = new Label();
         private readonly Label openClawStatus = new Label();
+        private readonly LinkLabel codexPluginNotice = new LinkLabel();
         private readonly BufferedOverlay closingOverlay = new BufferedOverlay();
         private readonly Timer closingTimer = new Timer();
         private readonly Font closingFont = new Font("Segoe UI Semibold", 11F);
@@ -81,7 +91,6 @@ namespace NeonX.OpenClawInstaller
         private Process gatewayProcess;
         private string gatewayToken = "";
         private int gatewayPort = 18789;
-        private volatile bool gatewayDatabaseRepairRequired;
 
         public InstallerForm()
         {
@@ -91,8 +100,9 @@ namespace NeonX.OpenClawInstaller
             BackColor = Color.FromArgb(15, 23, 42);
             ForeColor = Color.White;
             Font = new Font("Segoe UI", 9F);
-            FormBorderStyle = FormBorderStyle.FixedSingle;
-            MaximizeBox = false;
+            FormBorderStyle = FormBorderStyle.Sizable;
+            MaximizeBox = true;
+            MinimumSize = new Size(836, 640);
             try { Icon = Icon.ExtractAssociatedIcon(typeof(InstallerForm).Assembly.Location); }
             catch { }
 
@@ -108,8 +118,10 @@ namespace NeonX.OpenClawInstaller
             Controls.Add(MakeLabel("Install, launch, and manage your local AI agents", 124, 70, 9F, Color.FromArgb(148, 163, 184)));
 
             RoundedPanel card = new RoundedPanel();
+            agentCard = card;
             card.Location = new Point(30, 120);
             card.Size = new Size(760, 194);
+            card.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             card.BackColor = Color.FromArgb(30, 41, 59);
             card.BorderColor = Color.FromArgb(51, 65, 85);
             card.CornerRadius = 18;
@@ -140,14 +152,24 @@ namespace NeonX.OpenClawInstaller
             openClawStatus.Location = new Point(106, 109);
             card.Controls.Add(openClawStatus);
 
+            codexPluginNotice.Text = "Codex plugin is not installed - click to install";
+            codexPluginNotice.LinkColor = Color.FromArgb(251, 191, 36);
+            codexPluginNotice.ActiveLinkColor = Color.White;
+            codexPluginNotice.AutoSize = true;
+            codexPluginNotice.Font = new Font("Segoe UI Semibold", 8.5F, FontStyle.Bold);
+            codexPluginNotice.Location = new Point(106, 130);
+            codexPluginNotice.Visible = false;
+            codexPluginNotice.LinkClicked += async delegate { await InstallCodexPluginAsync(); };
+            card.Controls.Add(codexPluginNotice);
+
             ConfigureButton(install, "Checking...", 0, Color.FromArgb(8, 145, 178));
-            install.Location = new Point(500, 42);
+            install.Location = new Point(620, 42);
             install.Size = new Size(112, 42);
             install.Enabled = false;
             install.Click += async delegate { await HandleOpenClawActionAsync(); };
             card.Controls.Add(install);
 
-            updateLink.Text = "Update available";
+            updateLink.Text = "Apply target version";
             updateLink.LinkColor = Color.FromArgb(34, 211, 238);
             updateLink.ActiveLinkColor = Color.White;
             updateLink.AutoSize = true;
@@ -157,21 +179,41 @@ namespace NeonX.OpenClawInstaller
             updateLink.LinkClicked += async delegate { await UpdateOpenClawAsync(); };
             card.Controls.Add(updateLink);
 
-            ConfigureButton(repair, "Repair", 0, Color.FromArgb(180, 83, 9));
-            repair.Location = new Point(620, 42);
-            repair.Size = new Size(110, 42);
-            repair.Enabled = false;
-            repair.Visible = false;
-            repair.Click += async delegate { await RepairOpenClawAsync(); };
-            card.Controls.Add(repair);
+            ToolStripMenuItem uninstallItem = new ToolStripMenuItem("Uninstall");
+            uninstallItem.ForeColor = Color.FromArgb(185, 28, 28);
+            uninstallItem.Click += async delegate { await UninstallOpenClawAsync(); };
+            agentMenuItems.Items.Add(uninstallItem);
+
+            agentMenu.Text = "☰  Menu";
+            agentMenu.Font = new Font("Segoe UI Semibold", 9F, FontStyle.Bold);
+            agentMenu.TextAlign = ContentAlignment.MiddleCenter;
+            agentMenu.Location = new Point(714, 46);
+            agentMenu.Size = new Size(82, 42);
+            agentMenu.BackColor = Color.FromArgb(51, 65, 85);
+            agentMenu.ForeColor = Color.FromArgb(226, 232, 240);
+            agentMenu.FlatStyle = FlatStyle.Flat;
+            agentMenu.FlatAppearance.BorderSize = 0;
+            agentMenu.FlatAppearance.MouseOverBackColor = Color.FromArgb(71, 85, 105);
+            agentMenu.FlatAppearance.MouseDownBackColor = Color.FromArgb(30, 41, 59);
+            agentMenu.Cursor = Cursors.Hand;
+            agentMenu.Visible = false;
+            agentMenu.Click += delegate { agentMenuItems.Show(agentMenu, new Point(0, agentMenu.Height)); };
+            card.Controls.Add(agentMenu);
+
+            // Retained as an invisible control to keep the existing action
+            // enablement flow centralized; removal is exposed only by the menu.
+            uninstall.Enabled = false;
+            uninstall.Visible = false;
+            uninstall.Click += async delegate { await UninstallOpenClawAsync(); };
 
             ConfigureButton(stop, "Stop", 0, Color.FromArgb(185, 28, 28));
-            stop.Location = new Point(380, 42);
+            stop.Location = new Point(500, 42);
             stop.Size = new Size(110, 42);
             stop.Enabled = false;
             stop.Visible = false;
             stop.Click += async delegate { await StopOpenClawAsync(); };
             card.Controls.Add(stop);
+            card.Resize += delegate { LayoutAgentActionButtons(); };
 
             ConfigureButton(addModel, "+  Add model", 500, Color.FromArgb(14, 116, 144));
             addModel.Location = new Point(106, 154);
@@ -189,6 +231,7 @@ namespace NeonX.OpenClawInstaller
             status.BringToFront();
             progress.Location = new Point(32, 348);
             progress.Size = new Size(756, 12);
+            progress.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             Controls.Add(progress);
 
             closingOverlay.Dock = DockStyle.Fill;
@@ -215,6 +258,7 @@ namespace NeonX.OpenClawInstaller
 
             log.Location = new Point(32, 376);
             log.Size = new Size(756, 180);
+            log.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             log.Multiline = true;
             log.ReadOnly = true;
             log.ScrollBars = RichTextBoxScrollBars.Vertical;
@@ -230,11 +274,13 @@ namespace NeonX.OpenClawInstaller
             ConfigureButton(refresh, "Refresh", 572, Color.FromArgb(51, 65, 85));
             refresh.Location = new Point(690, 42);
             refresh.Size = new Size(88, 36);
+            refresh.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             refresh.Click += async delegate { await RefreshAgentsAsync(); };
             Controls.Add(refresh);
             ConfigureButton(desktopShortcut, "Desktop shortcut", 450, Color.FromArgb(51, 65, 85));
             desktopShortcut.Location = new Point(550, 42);
             desktopShortcut.Size = new Size(130, 36);
+            desktopShortcut.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             desktopShortcut.Click += delegate { CreateDesktopShortcut(); };
             Controls.Add(desktopShortcut);
             LinkLabel copyright = new LinkLabel();
@@ -245,6 +291,7 @@ namespace NeonX.OpenClawInstaller
             copyright.AutoSize = true;
             copyright.LinkArea = new LinkArea(0, copyright.Text.Length);
             copyright.Location = new Point(32, 568);
+            copyright.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
             copyright.LinkClicked += delegate { OpenUrl("https://neonx.ai"); };
             Controls.Add(copyright);
 
@@ -292,11 +339,13 @@ namespace NeonX.OpenClawInstaller
                 string verify = RefreshPath() + "; $c=Get-Command openclaw -ErrorAction SilentlyContinue; if(!$c){exit 127}; & $c.Source --version";
                 code = await RunAsync("-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command " + Quote(verify), logPath);
                 if (code != 0) throw new InvalidOperationException("Could not verify openclaw --version.");
+
                 progress.Style = ProgressBarStyle.Blocks;
                 progress.Value = 100;
                 openClawInstalled = true;
                 openClawStatus.Text = "OpenClaw: installed - version " + Version;
                 openClawStatus.ForeColor = Color.FromArgb(74, 222, 128);
+                UpdateCodexPluginNotice();
                 install.Text = "Open";
                 SetStatus("OpenClaw installed successfully");
                 Write("[COMPLETE] OpenClaw is ready.");
@@ -343,10 +392,10 @@ namespace NeonX.OpenClawInstaller
         {
             if (busy) return;
             DialogResult answer = MessageBox.Show(
-                "OpenClaw may change its configuration format during an upgrade. Your current settings could require review or reconfiguration afterward.\r\n\r\nInstalled version: "
+                "OpenClaw may change its configuration format when applying a different version. Your current settings could require review or reconfiguration afterward. This can also replace a newer OpenClaw version with the configured target.\r\n\r\nInstalled version: "
                     + (string.IsNullOrWhiteSpace(detectedOpenClawVersion) ? "unknown" : detectedOpenClawVersion)
-                    + "\r\nTarget version: " + Version + "\r\n\r\nContinue with the upgrade?",
-                "Confirm OpenClaw upgrade", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+                    + "\r\nTarget version: " + Version + "\r\n\r\nContinue?",
+                "Apply OpenClaw target version", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
             if (answer != DialogResult.Yes) return;
 
             busy = true;
@@ -547,26 +596,29 @@ namespace NeonX.OpenClawInstaller
             {
                 string installedVersion = LastNonEmptyLine(result.Output);
                 detectedOpenClawVersion = installedVersion;
-                openClawUpdateAvailable = IsUpdateAvailable(installedVersion, Version);
+                openClawUpdateAvailable = IsVersionDifferent(installedVersion, Version);
                 openClawStatus.Text = "OpenClaw: installed" + (installedVersion.Length > 0 ? " - version " + installedVersion : "");
-                openClawStatus.ForeColor = Color.FromArgb(74, 222, 128);
+                openClawStatus.ForeColor = openClawUpdateAvailable
+                    ? Color.FromArgb(251, 191, 36)
+                    : Color.FromArgb(74, 222, 128);
+                UpdateCodexPluginNotice();
                 install.Text = "Open";
                 updateLink.Visible = openClawUpdateAvailable;
-                repair.Visible = false;
-                repair.Enabled = false;
+                SetUninstallVisibility(true);
                 addModel.Visible = false;
                 SetStatus(openClawUpdateAvailable
-                        ? "A newer OpenClaw version (" + Version + ") is available - update when you are ready"
+                        ? "OpenClaw target version " + Version + " is available - apply it when you are ready"
                         : "OpenClaw is installed and ready");
             }
             else
             {
                 openClawStatus.Text = "OpenClaw: not installed";
                 openClawStatus.ForeColor = Color.FromArgb(248, 113, 113);
+                codexPluginNotice.Visible = false;
+                codexPluginNotice.Enabled = false;
                 install.Text = nodeReady ? "Install" : (nodeDetected ? "Upgrade Node" : "Install Node");
                 updateLink.Visible = false;
-                repair.Visible = false;
-                repair.Enabled = false;
+                SetUninstallVisibility(false);
                 addModel.Visible = false;
                 SetStatus(nodeReady
                     ? "OpenClaw is available to install"
@@ -604,19 +656,22 @@ namespace NeonX.OpenClawInstaller
             install.Enabled = false;
             install.Text = "Opening...";
             stop.Visible = false;
-            repair.Visible = false;
-            repair.Enabled = false;
-            gatewayDatabaseRepairRequired = false;
+            uninstall.Enabled = false;
             progress.Style = ProgressBarStyle.Blocks;
             progress.Value = 5;
             log.Clear();
-            SetStatus("Open 1/5 - Synchronizing NeonX models");
-            Write("[OPEN 1/5] OpenClaw is installed. Synchronizing the default NeonX models...");
+            SetStatus("Open 1/6 - Synchronizing NeonX models");
+            Write("[OPEN 1/6] OpenClaw is installed. Synchronizing the default NeonX models...");
             await EnsureDefaultNeonxModelsAsync();
 
-            progress.Value = 25;
-            SetStatus("Open 2/5 - Checking local gateway configuration");
-            Write("[OPEN 2/5] Checking gateway.mode...");
+            progress.Value = 20;
+            SetStatus("Open 2/6 - Checking Codex plugin integration");
+            Write("[OPEN 2/6] Checking whether the installed Codex plugin can discover your native Codex threads...");
+            await EnsureCodexPluginIntegrationAsync();
+
+            progress.Value = 35;
+            SetStatus("Open 3/6 - Checking local gateway configuration");
+            Write("[OPEN 3/6] Checking gateway.mode...");
             CommandResult mode = await RunOpenClawCaptureAsync("config get gateway.mode");
             if (mode.ExitCode != 0)
             {
@@ -628,12 +683,13 @@ namespace NeonX.OpenClawInstaller
                 ShowDashboardError(mode);
                 install.Text = "Open";
                 install.Enabled = true;
+                uninstall.Enabled = openClawInstalled;
                 return;
             }
 
-            progress.Value = 45;
-            SetStatus("Open 3/5 - Resolving the gateway port");
-            Write("[OPEN 3/5] Reading the configured gateway port...");
+            progress.Value = 50;
+            SetStatus("Open 4/6 - Resolving the gateway port");
+            Write("[OPEN 4/6] Reading the configured gateway port...");
             CommandResult portResult = await RunOpenClawCaptureAsync("config get gateway.port");
             int configuredPort;
             if (portResult.ExitCode == 0 && int.TryParse(LastNonEmptyLine(portResult.Output), out configuredPort) && configuredPort > 0 && configuredPort <= 65535)
@@ -641,8 +697,8 @@ namespace NeonX.OpenClawInstaller
             Write("Gateway port: " + gatewayPort);
 
             progress.Value = 65;
-            SetStatus("Open 4/5 - Restarting the OpenClaw gateway");
-            Write("[OPEN 4/5] Stopping any existing gateway, then starting fresh so new settings apply...");
+            SetStatus("Open 5/6 - Restarting the OpenClaw gateway");
+            Write("[OPEN 5/6] Stopping any existing gateway, then starting fresh so new settings apply...");
             await StopOpenClawGatewayAsync();
             // OpenClaw may need several seconds to release the old listener and
             // open its database/plugins before the new process can bind.
@@ -653,12 +709,13 @@ namespace NeonX.OpenClawInstaller
                 ShowDashboardError(new CommandResult(1, "", gatewayError));
                 install.Text = "Open";
                 install.Enabled = true;
+                uninstall.Enabled = openClawInstalled;
                 return;
             }
 
             progress.Value = 80;
-            SetStatus("Open 5/5 - Waiting for the Control UI");
-            Write("[OPEN 5/5] Gateway process started. Waiting for the Control UI...");
+            SetStatus("Open 6/6 - Waiting for the Control UI");
+            Write("[OPEN 6/6] Gateway process started. Waiting for the Control UI...");
             bool gatewayReady = await WaitForGatewayAsync(gatewayPort);
             if (!gatewayReady)
             {
@@ -672,12 +729,6 @@ namespace NeonX.OpenClawInstaller
                     string error = string.IsNullOrWhiteSpace(gatewayError)
                         ? "The OpenClaw gateway did not become ready after two attempts. Check the OpenClaw gateway log for details."
                         : gatewayError;
-                    if (gatewayDatabaseRepairRequired)
-                    {
-                        repair.Visible = true;
-                        repair.Enabled = true;
-                        error = "OpenClaw reports that an agent database schema migration is required. Click Repair to run openclaw doctor --fix, then NeonX will restart the gateway.";
-                    }
                     ShowDashboardError(new CommandResult(1, "", error));
                 }
             }
@@ -700,6 +751,7 @@ namespace NeonX.OpenClawInstaller
             }
             install.Text = "Open";
             install.Enabled = true;
+            uninstall.Enabled = openClawInstalled;
         }
 
         private async Task StopOpenClawAsync()
@@ -734,60 +786,66 @@ namespace NeonX.OpenClawInstaller
             }
         }
 
-        private async Task RepairOpenClawAsync()
+        private async Task UninstallOpenClawAsync()
         {
             if (busy || !openClawInstalled) return;
             DialogResult answer = MessageBox.Show(
-                "NeonX will stop the OpenClaw gateway, run the official OpenClaw database repair and migration command (doctor --fix), then restart the gateway.\r\n\r\nUse this when the gateway reports that an agent database schema needs migration. Continue?",
-                "Repair OpenClaw database", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+                "This permanently removes OpenClaw and deletes all local OpenClaw data at:\r\n\r\n"
+                    + Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".openclaw")
+                    + "\r\n\r\nThis includes agent databases, chat history, sessions, credentials, plugins, configuration, and backups. This cannot be undone. Continue?",
+                "Permanently uninstall OpenClaw", MessageBoxButtons.YesNo, MessageBoxIcon.Stop);
             if (answer != DialogResult.Yes) return;
 
             busy = true;
             SetEnabled(false);
-            repair.Text = "Repairing...";
+            ControlBox = false;
+            uninstall.Text = "Removing...";
             progress.Style = ProgressBarStyle.Marquee;
             progress.Value = 0;
             log.Clear();
-            SetStatus("Repair 1/3 - Stopping the OpenClaw gateway");
-            Write("[REPAIR 1/3] Stopping the gateway before database repair...");
+            SetStatus("Uninstall 1/3 - Stopping the OpenClaw gateway");
+            Write("[UNINSTALL 1/3] Stopping the gateway...");
 
             try
             {
                 await StopOpenClawGatewayAsync();
                 await Task.Delay(500);
 
-                SetStatus("Repair 2/3 - Migrating OpenClaw agent databases");
-                Write("[REPAIR 2/3] Running openclaw doctor --fix...");
-                CommandResult result = await RunOpenClawStreamingCaptureAsync("doctor --fix", "[doctor]");
-                string details = StripPowerShellClixml(string.IsNullOrWhiteSpace(result.Error) ? result.Output : result.Error);
-                if (result.ExitCode != 0)
-                    throw new InvalidOperationException(string.IsNullOrWhiteSpace(details)
-                        ? "OpenClaw doctor --fix returned error code " + result.ExitCode + "."
-                        : "OpenClaw doctor --fix failed: " + details);
+                SetStatus("Uninstall 2/3 - Removing the OpenClaw package");
+                Write("[UNINSTALL 2/3] Running npm uninstall -g openclaw...");
+                string logPath = Path.Combine(Path.GetTempPath(), "NeonX", "OpenClaw-uninstall.log");
+                Directory.CreateDirectory(Path.GetDirectoryName(logPath));
+                int code = await RunAsync("-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command " + Quote(RefreshPath() + "; npm uninstall -g openclaw"), logPath);
+                if (code != 0) throw new InvalidOperationException("npm uninstall returned error code " + code + ". Data was not deleted. See: " + logPath);
+
+                SetStatus("Uninstall 3/3 - Permanently deleting OpenClaw data");
+                DeleteOpenClawDataDirectory();
 
                 progress.Style = ProgressBarStyle.Blocks;
                 progress.Value = 100;
-                SetStatus("Repair complete - restarting OpenClaw");
-                Write("[COMPLETE] OpenClaw database repair completed. Restarting the gateway...");
+                openClawInstalled = false;
+                SetUninstallVisibility(false);
+                SetStatus("OpenClaw and all local data were permanently removed");
+                Write("[COMPLETE] OpenClaw package and .openclaw data directory were permanently removed.");
+                MessageBox.Show("OpenClaw and all data in .openclaw were permanently removed.", "OpenClaw uninstalled", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception error)
             {
                 progress.Style = ProgressBarStyle.Blocks;
                 progress.Value = 0;
-                SetStatus("OpenClaw repair did not complete");
+                SetStatus("OpenClaw uninstall did not complete");
                 Write("[ERROR] " + error.Message);
-                MessageBox.Show(error.Message, "OpenClaw repair failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return;
+                MessageBox.Show(error.Message, "OpenClaw uninstall failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally
             {
                 busy = false;
-                repair.Text = "Repair";
+                uninstall.Text = "Uninstall";
                 SetEnabled(true);
+                ControlBox = true;
             }
 
             await RefreshAgentsAsync();
-            if (openClawInstalled) await OpenDashboardAsync();
         }
 
         private async Task StopOpenClawGatewayAsync()
@@ -839,6 +897,203 @@ namespace NeonX.OpenClawInstaller
             CommandResult memory = await RunOpenClawCaptureAsync("config set memory.search.provider none");
             if (memory.ExitCode == 0) Write("  - Memory uses local FTS search; implicit OpenAI embeddings disabled.");
             else Write("  - Could not disable implicit OpenAI memory embeddings: " + StripPowerShellClixml(memory.Error));
+        }
+
+        private async Task EnsureCodexPluginIntegrationAsync()
+        {
+            if (!GetInstalledCodexPluginVersion().Equals(CodexPluginVersion, StringComparison.OrdinalIgnoreCase))
+            {
+                Write("  - Codex plugin " + CodexPluginVersion + " is not installed; skipped native Codex thread discovery setup.");
+                return;
+            }
+
+            if (HasFastCodexThreadIntegrationConfig())
+            {
+                Write("  - Codex threads already use your shared .codex home; background catalog scanning remains disabled.");
+                return;
+            }
+
+            // The shared user home is sufficient for /codex threads. Do not
+            // start the session catalog or supervision scan here: either can
+            // enumerate a large native Codex history and block gateway startup.
+            // One merged write preserves all unrelated Codex plugin settings.
+            const string integrationConfig = "{\"sessionCatalog\":{\"enabled\":false},\"supervision\":{\"enabled\":false,\"allowWriteControls\":true},\"appServer\":{\"transport\":\"stdio\",\"homeScope\":\"user\"}}";
+            CommandResult configured = await RunOpenClawCaptureAsync("config set plugins.entries.codex.config \"" + integrationConfig.Replace("\"", "\\\"") + "\" --strict-json --merge");
+            if (configured.ExitCode == 0)
+            {
+                Write("  - Codex threads use your shared .codex home; background catalog scanning is disabled for fast startup.");
+                return;
+            }
+            string details = StripPowerShellClixml(string.IsNullOrWhiteSpace(configured.Error) ? configured.Output : configured.Error);
+            Write("  - Could not configure Codex thread discovery: " + details);
+        }
+
+        private static bool HasFastCodexThreadIntegrationConfig()
+        {
+            try
+            {
+                string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".openclaw", "openclaw.json");
+                if (!File.Exists(path)) return false;
+                Dictionary<string, object> root = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText(path, Encoding.UTF8));
+                Dictionary<string, object> plugins = GetJsonObject(root, "plugins");
+                Dictionary<string, object> entries = GetJsonObject(plugins, "entries");
+                Dictionary<string, object> codex = GetJsonObject(entries, DefaultCodexPluginId);
+                Dictionary<string, object> config = GetJsonObject(codex, "config");
+                Dictionary<string, object> catalog = GetJsonObject(config, "sessionCatalog");
+                Dictionary<string, object> supervision = GetJsonObject(config, "supervision");
+                Dictionary<string, object> appServer = GetJsonObject(config, "appServer");
+                object catalogEnabled;
+                object allowWriteControls;
+                object transport;
+                object homeScope;
+                return catalog != null && catalog.TryGetValue("enabled", out catalogEnabled) && catalogEnabled is bool && !(bool)catalogEnabled
+                    && supervision != null && supervision.TryGetValue("allowWriteControls", out allowWriteControls) && allowWriteControls is bool && (bool)allowWriteControls
+                    && appServer != null && appServer.TryGetValue("transport", out transport) && "stdio".Equals(transport as string, StringComparison.OrdinalIgnoreCase)
+                    && appServer.TryGetValue("homeScope", out homeScope) && "user".Equals(homeScope as string, StringComparison.OrdinalIgnoreCase);
+            }
+            catch { return false; }
+        }
+
+        private static Dictionary<string, object> GetJsonObject(Dictionary<string, object> source, string key)
+        {
+            if (source == null) return null;
+            object value;
+            return source.TryGetValue(key, out value) ? value as Dictionary<string, object> : null;
+        }
+
+        private async Task InstallCodexPluginAsync()
+        {
+            if (busy || !openClawInstalled) return;
+            if (MessageBox.Show(
+                "Install and enable OpenClaw Codex plugin " + CodexPluginVersion + "? If a different version is installed, NeonX will replace it, including a newer version. The plugin's declared capabilities will be accepted during installation.",
+                "Install Codex plugin", MessageBoxButtons.YesNo, MessageBoxIcon.Information) != DialogResult.Yes) return;
+
+            busy = true;
+            SetEnabled(false);
+            codexPluginNotice.Enabled = false;
+            progress.Style = ProgressBarStyle.Marquee;
+            progress.Value = 0;
+            log.Clear();
+            SetStatus("Installing the OpenClaw Codex plugin - live logs appear below");
+            Write("[CODEX] Installing the official Codex plugin " + CodexPluginVersion + "...");
+
+            try
+            {
+                Write("[CODEX] Command: openclaw plugins install " + DefaultCodexPluginPackage + " --force --accept-capabilities");
+                CommandResult installed = await RunOpenClawStreamingCaptureAsync("plugins install " + DefaultCodexPluginPackage + " --force --accept-capabilities", "[codex]");
+                string details = StripPowerShellClixml(string.IsNullOrWhiteSpace(installed.Error) ? installed.Output : installed.Error);
+                if (installed.ExitCode != 0)
+                    throw new InvalidOperationException(string.IsNullOrWhiteSpace(details)
+                        ? "Codex plugin installation returned error code " + installed.ExitCode + "."
+                        : details);
+
+                Write("[CODEX] Enabling the Codex plugin...");
+                Write("[CODEX] Command: openclaw plugins enable " + DefaultCodexPluginId + " --accept-capabilities");
+                CommandResult enabled = await RunOpenClawStreamingCaptureAsync("plugins enable " + DefaultCodexPluginId + " --accept-capabilities", "[codex]");
+                details = StripPowerShellClixml(string.IsNullOrWhiteSpace(enabled.Error) ? enabled.Output : enabled.Error);
+                if (enabled.ExitCode != 0)
+                    throw new InvalidOperationException(string.IsNullOrWhiteSpace(details)
+                        ? "Codex plugin enablement returned error code " + enabled.ExitCode + "."
+                        : details);
+
+                progress.Style = ProgressBarStyle.Blocks;
+                progress.Value = 100;
+                SetStatus("The OpenClaw Codex plugin is installed and enabled");
+                Write("[COMPLETE] Codex plugin is ready.");
+            }
+            catch (Exception error)
+            {
+                progress.Style = ProgressBarStyle.Blocks;
+                progress.Value = 0;
+                SetStatus("Codex plugin installation did not complete");
+                Write("[ERROR] " + error.Message);
+                MessageBox.Show(error.Message, "Codex plugin installation failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                busy = false;
+            }
+            await RefreshAgentsAsync();
+        }
+
+        private void UpdateCodexPluginNotice()
+        {
+            string installedVersion = GetInstalledCodexPluginVersion();
+            if (installedVersion.Equals(CodexPluginVersion, StringComparison.OrdinalIgnoreCase))
+            {
+                codexPluginNotice.Text = "Codex plugin: " + installedVersion + " - current";
+                codexPluginNotice.LinkArea = new LinkArea(0, 0);
+                codexPluginNotice.LinkColor = Color.FromArgb(74, 222, 128);
+                codexPluginNotice.ForeColor = Color.FromArgb(74, 222, 128);
+                codexPluginNotice.Cursor = Cursors.Default;
+                codexPluginNotice.Visible = true;
+                codexPluginNotice.Enabled = true;
+                return;
+            }
+            codexPluginNotice.Text = string.IsNullOrWhiteSpace(installedVersion)
+                ? "Codex plugin is not installed - click to install " + CodexPluginVersion
+                : "Codex plugin " + installedVersion + " found; target is " + CodexPluginVersion + " - click to install";
+            codexPluginNotice.LinkArea = new LinkArea(0, codexPluginNotice.Text.Length);
+            Color noticeColor = string.IsNullOrWhiteSpace(installedVersion)
+                ? Color.FromArgb(226, 232, 240)
+                : Color.FromArgb(251, 191, 36);
+            codexPluginNotice.LinkColor = noticeColor;
+            codexPluginNotice.ForeColor = noticeColor;
+            codexPluginNotice.Cursor = Cursors.Hand;
+            codexPluginNotice.Visible = true;
+            codexPluginNotice.Enabled = !busy && openClawInstalled;
+        }
+
+        private static string GetInstalledCodexPluginVersion()
+        {
+            string openClawDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".openclaw");
+            // Older OpenClaw releases used this extension directory.
+            string installedVersion = ReadPackageVersion(Path.Combine(openClawDirectory, "extensions", DefaultCodexPluginId, "package.json"));
+            if (!string.IsNullOrWhiteSpace(installedVersion)) return installedVersion;
+
+            // npm plugins are installed in an isolated project rather than
+            // .openclaw\extensions. The suffix is generated by OpenClaw, so
+            // inspect each Codex project instead of depending on a fixed name.
+            string projectsDirectory = Path.Combine(openClawDirectory, "npm", "projects");
+            if (!Directory.Exists(projectsDirectory)) return "";
+            try
+            {
+                foreach (string projectDirectory in Directory.GetDirectories(projectsDirectory, "openclaw-codex-*"))
+                {
+                    installedVersion = ReadPackageVersion(Path.Combine(projectDirectory, "node_modules", "@openclaw", "codex", "package.json"));
+                    if (!string.IsNullOrWhiteSpace(installedVersion)) return installedVersion;
+                }
+            }
+            catch { }
+            return "";
+        }
+
+        private static string ReadPackageVersion(string packagePath)
+        {
+            if (!File.Exists(packagePath)) return "";
+            try
+            {
+                Dictionary<string, object> package = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText(packagePath, Encoding.UTF8));
+                object version;
+                return package != null && package.TryGetValue("version", out version) ? (version as string ?? "") : "";
+            }
+            catch { return ""; }
+        }
+
+        private static void DeleteOpenClawDataDirectory()
+        {
+            string homeDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            string dataDirectory = Path.GetFullPath(Path.Combine(homeDirectory, ".openclaw"));
+            string expectedDirectory = Path.GetFullPath(Path.Combine(homeDirectory, ".openclaw"));
+            if (!string.Equals(dataDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), expectedDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Refusing to delete an unexpected data directory: " + dataDirectory);
+            if (!Directory.Exists(dataDirectory)) return;
+
+            DirectoryInfo directory = new DirectoryInfo(dataDirectory);
+            foreach (FileSystemInfo entry in directory.GetFileSystemInfos("*", SearchOption.AllDirectories))
+                entry.Attributes = FileAttributes.Normal;
+            directory.Attributes = FileAttributes.Normal;
+            Directory.Delete(dataDirectory, true);
         }
 
         private async Task AddModelAsync()
@@ -923,6 +1178,7 @@ namespace NeonX.OpenClawInstaller
             info.RedirectStandardError = true;
             info.StandardOutputEncoding = Encoding.UTF8;
             info.StandardErrorEncoding = Encoding.UTF8;
+            if (!string.IsNullOrWhiteSpace(gatewayToken)) info.EnvironmentVariables["OPENCLAW_GATEWAY_TOKEN"] = gatewayToken;
             using (Process process = Process.Start(info))
             {
                 Task<string> output = process.StandardOutput.ReadToEndAsync();
@@ -946,6 +1202,7 @@ namespace NeonX.OpenClawInstaller
             info.RedirectStandardError = true;
             info.StandardOutputEncoding = Encoding.UTF8;
             info.StandardErrorEncoding = Encoding.UTF8;
+            if (!string.IsNullOrWhiteSpace(gatewayToken)) info.EnvironmentVariables["OPENCLAW_GATEWAY_TOKEN"] = gatewayToken;
             StringBuilder output = new StringBuilder();
             StringBuilder error = new StringBuilder();
             object outputLock = new object();
@@ -1031,7 +1288,6 @@ namespace NeonX.OpenClawInstaller
                 {
                     if (!string.IsNullOrWhiteSpace(eventArgs.Data))
                     {
-                        if (RequiresDatabaseRepair(eventArgs.Data)) gatewayDatabaseRepairRequired = true;
                         Write("[gateway error] " + eventArgs.Data);
                     }
                 };
@@ -1098,7 +1354,7 @@ namespace NeonX.OpenClawInstaller
                 if (attempt % 4 == 0)
                 {
                     int elapsedSeconds = attempt / 2;
-                    SetStatus("Open 5/5 - Waiting for Control UI (" + elapsedSeconds + "s)");
+                    SetStatus("Open 6/6 - Waiting for Control UI (" + elapsedSeconds + "s)");
                     Write("  - Waiting for Control UI: " + elapsedSeconds + " seconds elapsed...");
                     progress.Value = Math.Min(98, 80 + attempt / 2);
                 }
@@ -1160,14 +1416,14 @@ namespace NeonX.OpenClawInstaller
             return lines.Length == 0 ? "" : lines[lines.Length - 1].Trim().TrimStart('v');
         }
 
-        private static bool IsUpdateAvailable(string installedVersion, string targetVersion)
+        private static bool IsVersionDifferent(string installedVersion, string targetVersion)
         {
             int[] installed = ParseSemanticVersion(installedVersion);
             int[] target = ParseSemanticVersion(targetVersion);
-            if (installed == null || target == null) return false;
+            if (installed == null || target == null) return !string.Equals(installedVersion, targetVersion, StringComparison.OrdinalIgnoreCase);
             for (int index = 0; index < 3; index++)
             {
-                if (installed[index] != target[index]) return installed[index] < target[index];
+                if (installed[index] != target[index]) return true;
             }
             return false;
         }
@@ -1313,12 +1569,6 @@ namespace NeonX.OpenClawInstaller
             return (value.Substring(0, marker) + value.Substring(end + 7)).Trim();
         }
 
-        private static bool RequiresDatabaseRepair(string value)
-        {
-            return !string.IsNullOrWhiteSpace(value)
-                && value.IndexOf("doctor --fix", StringComparison.OrdinalIgnoreCase) >= 0;
-        }
-
         private static string PowerShellPath()
         {
             return Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
@@ -1398,17 +1648,34 @@ namespace NeonX.OpenClawInstaller
             }
         }
 
+        private void SetUninstallVisibility(bool visible)
+        {
+            agentMenu.Visible = visible;
+            uninstall.Enabled = visible && !busy && openClawInstalled;
+            LayoutAgentActionButtons();
+        }
+
+        private void LayoutAgentActionButtons()
+        {
+            if (agentCard == null) return;
+            int right = agentCard.ClientSize.Width - 28;
+            agentMenu.Location = new Point(right - agentMenu.Width, 42);
+            install.Location = new Point(agentMenu.Left - 16 - install.Width, 42);
+            stop.Location = new Point(install.Left - 10 - stop.Width, 42);
+        }
+
         private void SetEnabled(bool enabled)
         {
             install.Enabled = enabled;
             updateLink.Enabled = enabled && updateLink.Visible;
-            repair.Enabled = enabled && repair.Visible && openClawInstalled;
+            codexPluginNotice.Enabled = enabled && codexPluginNotice.Visible && openClawInstalled;
+            uninstall.Enabled = enabled && uninstall.Visible && openClawInstalled;
+            agentMenu.Enabled = enabled && agentMenu.Visible && openClawInstalled;
             stop.Enabled = enabled && openClawInstalled;
             close.Enabled = enabled;
             refresh.Enabled = enabled;
             desktopShortcut.Enabled = enabled;
             source.Enabled = enabled;
-            ControlBox = enabled;
         }
 
         private void SetStatus(string text)
@@ -1467,6 +1734,22 @@ namespace NeonX.OpenClawInstaller
                 MessageBox.Show("NeonX components are being installed. Please wait for the process to complete.", "NeonX Agent Hub", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
+            bool gatewayRunning = gatewayProcess != null && !gatewayProcess.HasExited;
+            if (!gatewayRunning)
+            {
+                // No dashboard was opened by this Hub instance, so no cleanup
+                // is required and the standard window close can proceed.
+                return;
+            }
+            if (MessageBox.Show(
+                "OpenClaw is running in your browser. Exit NeonX Agent Hub and stop its local gateway?",
+                "Exit NeonX Agent Hub",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question) != DialogResult.Yes)
+            {
+                e.Cancel = true;
+                return;
+            }
             // Keep the window responsive and show clear feedback while the
             // gateway is being shut down. Closing is resumed after cleanup.
             e.Cancel = true;
@@ -1500,17 +1783,48 @@ namespace NeonX.OpenClawInstaller
     internal sealed class RoundedPanel : Panel
     {
         public Color BorderColor { get; set; }
-        public int CornerRadius { get; set; }
+        private int cornerRadius;
+        public int CornerRadius
+        {
+            get { return cornerRadius; }
+            set
+            {
+                cornerRadius = value;
+                UpdateRoundedRegion();
+                Invalidate();
+            }
+        }
 
         public RoundedPanel()
         {
             DoubleBuffered = true;
             ResizeRedraw = true;
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.SupportsTransparentBackColor, true);
+        }
+
+        protected override void OnResize(EventArgs e)
+        {
+            base.OnResize(e);
+            UpdateRoundedRegion();
+        }
+
+        private void UpdateRoundedRegion()
+        {
+            if (Width <= 0 || Height <= 0) return;
+            using (GraphicsPath path = RoundedLogo.CreateRoundedRectangle(new Rectangle(0, 0, Width, Height), CornerRadius))
+            {
+                Region oldRegion = Region;
+                Region = new Region(path);
+                if (oldRegion != null) oldRegion.Dispose();
+            }
         }
 
         protected override void OnPaint(PaintEventArgs e)
         {
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            e.Graphics.CompositingQuality = CompositingQuality.HighQuality;
+            e.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            e.Graphics.Clear(Parent == null ? BackColor : Parent.BackColor);
             Rectangle bounds = new Rectangle(0, 0, Width - 1, Height - 1);
             using (GraphicsPath path = RoundedLogo.CreateRoundedRectangle(bounds, CornerRadius))
             using (SolidBrush fill = new SolidBrush(BackColor))
