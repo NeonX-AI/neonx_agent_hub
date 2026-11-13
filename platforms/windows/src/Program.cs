@@ -861,7 +861,7 @@ namespace NeonX.OpenClawInstaller
                 Write("  - Could not load " + DefaultModelsFileName + ": " + ex.Message);
                 return;
             }
-            string provider = "{\"api\":\"openai-responses\",\"baseUrl\":\"https://api.neonx.ai/v1\",\"auth\":\"api-key\",\"authHeader\":true,\"headers\":{\"User-Agent\":\"neonx-agent/1.0\"},\"models\":" + models + "}";
+            string provider = "{\"api\":\"openai-responses\",\"baseUrl\":\"https://llm.neonx.ai/v1\",\"auth\":\"api-key\",\"authHeader\":true,\"headers\":{\"User-Agent\":\"neonx-agent/1.0\"},\"models\":" + models + "}";
             // Keep user-owned provider settings such as apiKey while replacing
             // the bundled NeonX model list.
             CommandResult result = await RunOpenClawCaptureAsync("config set models.providers.neonx \"" + provider.Replace("\"", "\\\"") + "\" --strict-json --merge");
